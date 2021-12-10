@@ -1,7 +1,7 @@
 /**
  * Provides an AST printer for debugging.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/printast.d, _printast.d)
@@ -16,6 +16,7 @@ import core.stdc.stdio;
 import dmd.expression;
 import dmd.tokens;
 import dmd.visitor;
+import dmd.hdrgen;
 
 /********************
  * Print AST data structure in a nice format.
@@ -45,7 +46,8 @@ extern (C++) final class PrintASTVisitor : Visitor
     override void visit(Expression e)
     {
         printIndent(indent);
-        printf("%s %s\n", Token.toChars(e.op), e.type ? e.type.toChars() : "");
+        auto s = EXPtoString(e.op);
+        printf("%.*s %s\n", cast(int)s.length, s.ptr, e.type ? e.type.toChars() : "");
     }
 
     override void visit(IntegerExp e)
@@ -57,13 +59,19 @@ extern (C++) final class PrintASTVisitor : Visitor
     override void visit(RealExp e)
     {
         printIndent(indent);
-        printf("Real %Lg %s\n", e.value, e.type ? e.type.toChars() : "");
+
+        import dmd.hdrgen : floatToBuffer;
+        import dmd.common.outbuffer : OutBuffer;
+        OutBuffer buf;
+        floatToBuffer(e.type, e.value, &buf, false);
+        printf("Real %s %s\n", buf.peekChars(), e.type ? e.type.toChars() : "");
     }
 
     override void visit(StructLiteralExp e)
     {
         printIndent(indent);
-        printf("%s %s, %s\n", Token.toChars(e.op), e.type ? e.type.toChars() : "", e.toChars());
+        auto s = EXPtoString(e.op);
+        printf("%.*s %s, %s\n", cast(int)s.length, s.ptr, e.type ? e.type.toChars() : "", e.toChars());
     }
 
     override void visit(SymbolExp e)

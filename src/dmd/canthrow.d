@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/function.html#nothrow-functions, Nothrow Functions)
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/canthrow.d, _canthrow.d)
@@ -17,6 +17,7 @@ import dmd.aggregate;
 import dmd.apply;
 import dmd.arraytypes;
 import dmd.attrib;
+import dmd.astenums;
 import dmd.declaration;
 import dmd.dsymbol;
 import dmd.expression;
@@ -114,10 +115,6 @@ extern (C++) bool canThrow(Expression e, FuncDeclaration func, bool mustNotThrow
         {
             if (ne.member)
             {
-                if (ne.allocator)
-                    // https://issues.dlang.org/show_bug.cgi?id=14407
-                    checkFuncThrows(ne, ne.allocator);
-
                 // See if constructor call can throw
                 checkFuncThrows(ne, ne.member);
             }
@@ -153,7 +150,7 @@ extern (C++) bool canThrow(Expression e, FuncDeclaration func, bool mustNotThrow
         override void visit(AssignExp ae)
         {
             // blit-init cannot throw
-            if (ae.op == TOK.blit)
+            if (ae.op == EXP.blit)
                 return;
             /* Element-wise assignment could invoke postblits.
              */

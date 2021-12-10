@@ -1,7 +1,7 @@
 /**
  * Invoke the linker as a separate process.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/link.d, _link.d)
@@ -22,12 +22,14 @@ import core.sys.windows.windef;
 import dmd.env;
 import dmd.errors;
 import dmd.globals;
+import dmd.mars;
 import dmd.root.file;
 import dmd.root.filename;
-import dmd.root.outbuffer;
+import dmd.common.outbuffer;
 import dmd.root.rmem;
 import dmd.root.string;
 import dmd.utils;
+import dmd.target;
 import dmd.vsoptions;
 
 version (Posix) extern (C) int pipe(int*);
@@ -214,7 +216,7 @@ public int runLINK()
 
     const(char)[] getMapFilename()
     {
-        const(char)[] fn = FileName.forceExt(global.params.exefile, "map");
+        const(char)[] fn = FileName.forceExt(global.params.exefile, map_ext);
         const(char)[] path = FileName.path(global.params.exefile);
         return path.length ? fn : FileName.combine(global.params.objdir, fn);
     }
@@ -224,7 +226,7 @@ public int runLINK()
         if (phobosLibname)
             global.params.libfiles.push(phobosLibname.xarraydup.ptr);
 
-        if (global.params.mscoff)
+        if (target.mscoff)
         {
             OutBuffer cmdbuf;
             cmdbuf.writestring("/NOLOGO");
@@ -257,7 +259,7 @@ public int runLINK()
                 cmdbuf.writestring("/MAP:");
                 writeFilename(&cmdbuf, global.params.mapfile);
             }
-            else if (global.params.map)
+            else if (dmdParams.map)
             {
                 cmdbuf.writestring("/MAP:");
                 writeFilename(&cmdbuf, getMapFilename());
@@ -299,23 +301,26 @@ public int runLINK()
                 global.params.mscrtlib[0..6] != "msvcrt" || !isdigit(global.params.mscrtlib[6]))
                 vsopt.initialize();
 
-            const(char)* lflags = vsopt.linkOptions(global.params.is64bit);
-            if (lflags)
+            const(char)* linkcmd = getenv(target.is64bit ? "LINKCMD64" : "LINKCMD");
+            if (!linkcmd)
+                linkcmd = getenv("LINKCMD"); // backward compatible
+            if (!linkcmd)
+                linkcmd = vsopt.linkerPath(target.is64bit);
+
+            if (!target.is64bit && FileName.equals(FileName.name(linkcmd), "lld-link.exe"))
+            {
+                // object files not SAFESEH compliant, but LLD is more picky than MS link
+                cmdbuf.writestring(" /SAFESEH:NO");
+                // if we are using LLD as a fallback, don't link to any VS libs even if
+                // we detected a VS installation and they are present
+                vsopt.uninitialize();
+            }
+
+            if (const(char)* lflags = vsopt.linkOptions(target.is64bit))
             {
                 cmdbuf.writeByte(' ');
                 cmdbuf.writestring(lflags);
             }
-
-            const(char)* linkcmd = getenv(global.params.is64bit ? "LINKCMD64" : "LINKCMD");
-            if (!linkcmd)
-                linkcmd = getenv("LINKCMD"); // backward compatible
-            if (!linkcmd)
-                linkcmd = vsopt.linkerPath(global.params.is64bit);
-
-            // object files not SAFESEH compliant, but LLD is more picky than MS link
-            if (!global.params.is64bit)
-                if (FileName.equals(FileName.name(linkcmd), "lld-link.exe"))
-                    cmdbuf.writestring(" /SAFESEH:NO");
 
             cmdbuf.writeByte(0); // null terminate the buffer
             char[] p = cmdbuf.extractSlice()[0 .. $-1];
@@ -373,7 +378,7 @@ public int runLINK()
             cmdbuf.writeByte(',');
             if (global.params.mapfile)
                 writeFilename(&cmdbuf, global.params.mapfile);
-            else if (global.params.map)
+            else if (dmdParams.map)
             {
                 writeFilename(&cmdbuf, getMapFilename());
             }
@@ -404,7 +409,7 @@ public int runLINK()
                 cmdbuf.writestring("/RC:");
                 writeFilename(&cmdbuf, global.params.resfile);
             }
-            if (global.params.map || global.params.mapfile)
+            if (dmdParams.map || global.params.mapfile)
                 cmdbuf.writestring("/m");
             version (none)
             {
@@ -540,7 +545,7 @@ public int runLINK()
             if (const e = FileName.ext(n))
             {
                 if (global.params.dll)
-                    ex = FileName.forceExt(ex, global.dll_ext);
+                    ex = FileName.forceExt(ex, target.dll_ext);
                 else
                     ex = FileName.removeExt(n);
             }
@@ -553,7 +558,7 @@ public int runLINK()
         ensurePathToNameExists(Loc.initial, global.params.exefile);
         if (global.params.symdebug)
             argv.push("-g");
-        if (global.params.is64bit)
+        if (target.is64bit)
             argv.push("-m64");
         else
             argv.push("-m32");
@@ -578,7 +583,7 @@ public int runLINK()
             argv.push("-Xlinker");
             argv.push("-no_compact_unwind");
         }
-        if (global.params.map || global.params.mapfile.length)
+        if (dmdParams.map || global.params.mapfile.length)
         {
             argv.push("-Xlinker");
             version (OSX)
@@ -591,7 +596,7 @@ public int runLINK()
             }
             if (!global.params.mapfile.length)
             {
-                const(char)[] fn = FileName.forceExt(global.params.exefile, "map");
+                const(char)[] fn = FileName.forceExt(global.params.exefile, map_ext);
                 const(char)[] path = FileName.path(global.params.exefile);
                 global.params.mapfile = path.length ? fn : FileName.combine(global.params.objdir, fn);
             }
@@ -742,6 +747,13 @@ public int runLINK()
             // Link against libdl for phobos usage of dlopen
             argv.push("-ldl");
         }
+        else version (OpenBSD)
+        {
+            // Link against -lc++abi for Unwind symbols
+            argv.push("-lc++abi");
+            // Link against -lexecinfo for backtrace symbols
+            argv.push("-lexecinfo");
+        }
         if (global.params.verbose)
         {
             // Print it
@@ -826,7 +838,7 @@ version (Windows)
         size_t len;
         if (global.params.verbose)
             message("%s %s", cmd, args);
-        if (!global.params.mscoff)
+        if (!target.mscoff)
         {
             if ((len = strlen(args)) > 255)
             {

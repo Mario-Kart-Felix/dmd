@@ -1,7 +1,7 @@
 /**
  * Generate debug info in the CV4 debug format.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/tocsym.d, _tocvdebug.d)
@@ -25,6 +25,7 @@ import dmd.root.rmem;
 
 import dmd.aggregate;
 import dmd.apply;
+import dmd.astenums;
 import dmd.dclass;
 import dmd.declaration;
 import dmd.denum;
@@ -621,7 +622,7 @@ void toDebug(ClassDeclaration cd)
 
     if (cd.parent.isAggregateDeclaration()) // if class is nested
         property |= 8;
-    if (cd.ctor || cd.dtors.dim)
+    if (cd.ctor || cd.dtor)
         property |= 2;          // class has ctors and/or dtors
 //    if (st.Sopoverload)
 //      property |= 4;          // class has overloaded operators

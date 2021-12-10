@@ -1,7 +1,7 @@
 /**
  * Code for generating .json descriptions of the module when passing the `-X` flag to dmd.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/json.d, _json.d)
@@ -15,6 +15,7 @@ import core.stdc.stdio;
 import core.stdc.string;
 import dmd.aggregate;
 import dmd.arraytypes;
+import dmd.astenums;
 import dmd.attrib;
 import dmd.cond;
 import dmd.dclass;
@@ -32,9 +33,10 @@ import dmd.hdrgen;
 import dmd.id;
 import dmd.identifier;
 import dmd.mtype;
-import dmd.root.outbuffer;
+import dmd.common.outbuffer;
 import dmd.root.rootobject;
 import dmd.root.string;
+import dmd.target;
 import dmd.visitor;
 
 version(Windows) {
@@ -331,7 +333,7 @@ public:
 
     extern(D) void propertyStorageClass(const char[] name, StorageClass stc)
     {
-        stc &= STCStorageClass;
+        stc &= STC.visibleStorageClasses;
         if (stc)
         {
             propertyStart(name);
@@ -792,8 +794,8 @@ public:
             property("init", d._init.toString());
         if (d.isField())
             property("offset", d.offset);
-        if (d.alignment && d.alignment != STRUCTALIGN_DEFAULT)
-            property("align", d.alignment);
+        if (!d.alignment.isUnknown() && !d.alignment.isDefault())
+            property("align", d.alignment.get());
         objectEnd();
     }
 
@@ -841,28 +843,28 @@ public:
         property("size_t", size_t.sizeof);
         propertyStart("platforms");
         arrayStart();
-        if (global.params.targetOS == TargetOS.Windows)
+        if (target.os == Target.OS.Windows)
         {
             item("windows");
         }
         else
         {
             item("posix");
-            if (global.params.targetOS == TargetOS.linux)
+            if (target.os == Target.OS.linux)
                 item("linux");
-            else if (global.params.targetOS == TargetOS.OSX)
+            else if (target.os == Target.OS.OSX)
                 item("osx");
-            else if (global.params.targetOS == TargetOS.FreeBSD)
+            else if (target.os == Target.OS.FreeBSD)
             {
                 item("freebsd");
                 item("bsd");
             }
-            else if (global.params.targetOS == TargetOS.OpenBSD)
+            else if (target.os == Target.OS.OpenBSD)
             {
                 item("openbsd");
                 item("bsd");
             }
-            else if (global.params.targetOS == TargetOS.Solaris)
+            else if (target.os == Target.OS.Solaris)
             {
                 item("solaris");
                 item("bsd");

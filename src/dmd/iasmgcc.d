@@ -1,7 +1,7 @@
 /**
  * Inline assembler for the GCC D compiler.
  *
- *              Copyright (C) 2018-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2018-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     Iain Buclaw
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/iasmgcc.d, _iasmgcc.d)
@@ -87,7 +87,7 @@ int parseExtAsmOperands(Parser)(Parser p, GccAsmStatement s)
                 // @@@DEPRECATED@@@
                 // Old parser allowed omitting parentheses around the expression.
                 // Deprecated in 2.091. Can be made permanent error after 2.100
-                if (p.token.value != TOK.leftParentheses)
+                if (p.token.value != TOK.leftParenthesis)
                 {
                     arg = p.parseAssignExp();
                     deprecation(arg.loc, "`%s` must be surrounded by parentheses", arg.toChars());
@@ -95,11 +95,11 @@ int parseExtAsmOperands(Parser)(Parser p, GccAsmStatement s)
                 else
                 {
                     // Look for the opening `(`
-                    p.check(TOK.leftParentheses);
+                    p.check(TOK.leftParenthesis);
                     // Parse the assign expression
                     arg = p.parseAssignExp();
                     // Look for the closing `)`
-                    p.check(TOK.rightParentheses);
+                    p.check(TOK.rightParenthesis);
                 }
 
                 if (!s.args)
@@ -240,13 +240,13 @@ Lerror:
  *      |     GotoAsmInstruction
  *      |
  *      | BasicAsmInstruction:
- *      |     Expression
+ *      |     AssignExpression
  *      |
  *      | ExtAsmInstruction:
- *      |     Expression : Operands(opt) : Operands(opt) : Clobbers(opt)
+ *      |     AssignExpression : Operands(opt) : Operands(opt) : Clobbers(opt)
  *      |
  *      | GotoAsmInstruction:
- *      |     Expression : : Operands(opt) : Clobbers(opt) : GotoLabels(opt)
+ *      |     AssignExpression : : Operands(opt) : Clobbers(opt) : GotoLabels(opt)
  * Params:
  *      p = parser state
  *      s = asm statement to parse
@@ -255,7 +255,7 @@ Lerror:
  */
 GccAsmStatement parseGccAsm(Parser)(Parser p, GccAsmStatement s)
 {
-    s.insn = p.parseExpression();
+    s.insn = p.parseAssignExp();
     if (p.token.value == TOK.semicolon || p.token.value == TOK.endOfFile)
         goto Ldone;
 
@@ -300,7 +300,7 @@ Ldone:
  * Returns:
  *      the completed gcc asm statement, or null if errors occurred
  */
-public Statement gccAsmSemantic(GccAsmStatement s, Scope *sc)
+extern (C++) public Statement gccAsmSemantic(GccAsmStatement s, Scope *sc)
 {
     //printf("GccAsmStatement.semantic()\n");
     scope p = new Parser!ASTCodegen(sc._module, ";", false);
@@ -348,7 +348,7 @@ public Statement gccAsmSemantic(GccAsmStatement s, Scope *sc)
 
             e = (*s.constraints)[i];
             e = e.expressionSemantic(sc);
-            assert(e.op == TOK.string_ && (cast(StringExp) e).sz == 1);
+            assert(e.op == EXP.string_ && (cast(StringExp) e).sz == 1);
             (*s.constraints)[i] = e;
         }
     }
@@ -360,7 +360,7 @@ public Statement gccAsmSemantic(GccAsmStatement s, Scope *sc)
         {
             Expression e = (*s.clobbers)[i];
             e = e.expressionSemantic(sc);
-            assert(e.op == TOK.string_ && (cast(StringExp) e).sz == 1);
+            assert(e.op == EXP.string_ && (cast(StringExp) e).sz == 1);
             (*s.clobbers)[i] = e;
         }
     }
@@ -429,9 +429,24 @@ unittest
         {
             if (p.token.value == TOK.rightCurly || p.token.value == TOK.endOfFile)
                 break;
-            *ptoklist = p.allocateToken();
-            memcpy(*ptoklist, &p.token, Token.sizeof);
-            ptoklist = &(*ptoklist).next;
+            if (p.token.value == TOK.colonColon)
+            {
+                *ptoklist = p.allocateToken();
+                memcpy(*ptoklist, &p.token, Token.sizeof);
+                (*ptoklist).value = TOK.colon;
+                ptoklist = &(*ptoklist).next;
+
+                *ptoklist = p.allocateToken();
+                memcpy(*ptoklist, &p.token, Token.sizeof);
+                (*ptoklist).value = TOK.colon;
+                ptoklist = &(*ptoklist).next;
+            }
+            else
+            {
+                *ptoklist = p.allocateToken();
+                memcpy(*ptoklist, &p.token, Token.sizeof);
+                ptoklist = &(*ptoklist).next;
+            }
             *ptoklist = null;
             p.nextToken();
         }
@@ -483,6 +498,12 @@ unittest
         // Likewise mixins, permissible so long as the result is a string.
         q{ asm { mixin(`"repne"`, `~ "scasb"`);
         } },
+
+        // :: token tests
+        q{ asm { "" : : : "memory"; } },
+        q{ asm { "" :: : "memory"; } },
+        q{ asm { "" : :: "memory"; } },
+        q{ asm { "" ::: "memory"; } },
     ];
 
     immutable string[] failAsmTests = [
@@ -501,6 +522,10 @@ unittest
         q{ asm { ""
                :
                : "g" (a ? b : : c);
+        } },
+
+        // Found ',' when expecting ':'
+        q{ asm { "", "";
         } },
     ];
 

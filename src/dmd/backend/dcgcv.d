@@ -1,9 +1,11 @@
 /**
+ * CodeView 4 symbolic debug info generation
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1984-1995 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/dcgcv.d, backend/dcgcv.d)
@@ -36,12 +38,13 @@ import dmd.backend.el;
 import dmd.backend.global;
 import dmd.backend.mem;
 import dmd.backend.obj;
-import dmd.backend.outbuf;
 import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 
 import dmd.backend.barray;
+
+import dmd.common.outbuffer;
 
 version (SCPP)
 {
@@ -57,9 +60,11 @@ version (MARS)
 extern (C++):
 
 nothrow:
+@safe:
 
 enum SYMDEB_TDB = false;
 
+@trusted
 extern (C) void TOOFFSET(void* p, targ_size_t value)
 {
     switch (_tysize[TYnptr])
@@ -89,8 +94,9 @@ enum DEBTYPVECDIM = 16_001;   //8009 //3001     // dimension of debtypvec (shoul
 enum DEBTYPHASHDIM = 1009;
 private uint[DEBTYPHASHDIM] debtyphash;
 
-private Outbuffer *reset_symbuf; // Keep pointers to reset symbols
+private OutBuffer *reset_symbuf; // Keep pointers to reset symbols
 
+@trusted
 idx_t DEB_NULL() { return cgcv.deb_offset; }        // index of null debug type record
 
 /* This limitation is because of 4K page sizes
@@ -124,6 +130,7 @@ else
  * Return number of bytes consumed in OBJ file by a name.
  */
 
+@trusted
 int cv_stringbytes(const(char)* name)
 {
     int len = cast(int)strlen(name);
@@ -140,6 +147,7 @@ int cv_stringbytes(const(char)* name)
  *      number of bytes consumed
  */
 
+@trusted
 int cv_namestring(ubyte *p, const(char)* name, int length = -1)
 {
     size_t len = (length >= 0) ? length : strlen(name);
@@ -182,6 +190,7 @@ int cv_namestring(ubyte *p, const(char)* name, int length = -1)
  *      16..23  dword registers
  */
 
+@trusted
 private int cv_regnum(Symbol *s)
 {
     uint reg = s.Sreglsw;
@@ -229,7 +238,7 @@ static if (0)
 /***********************************
  * Allocate a debtyp_t.
  */
-
+@trusted
 debtyp_t * debtyp_alloc(uint length)
 {
     debtyp_t *d;
@@ -268,6 +277,7 @@ else
  * Free a debtyp_t.
  */
 
+@trusted
 private void debtyp_free(debtyp_t *d)
 {
     //printf("debtyp_free(length = %d, %p)\n", d.length, d);
@@ -312,6 +322,7 @@ void debtyp_check(debtyp_t* d) { }
  *      index in debtyp[]
  */
 
+@trusted
 idx_t cv_debtyp(debtyp_t *d)
 {
     ushort length;
@@ -413,6 +424,7 @@ static if (0)
     return cast(uint)debtyp.length - 1 + cgcv.deb_offset;
 }
 
+@trusted
 idx_t cv_numdebtypes()
 {
     return cast(idx_t)debtyp.length;
@@ -422,6 +434,7 @@ idx_t cv_numdebtypes()
  * Store a null record at DEB_NULL.
  */
 
+@trusted
 void cv_init()
 {   debtyp_t *d;
 
@@ -450,7 +463,7 @@ void cv_init()
     }
     else
     {
-        reset_symbuf = cast(Outbuffer*) calloc(1, Outbuffer.sizeof);
+        reset_symbuf = cast(OutBuffer*) calloc(1, OutBuffer.sizeof);
         assert(reset_symbuf);
         reset_symbuf.reserve(10 * (Symbol*).sizeof);
     }
@@ -637,6 +650,7 @@ uint cv4_numericbytes(uint value)
  * Must use exact same number of bytes as cv4_numericbytes().
  */
 
+@trusted
 void cv4_storenumeric(ubyte *p, uint value)
 {
     if (value < 0x8000)
@@ -678,6 +692,7 @@ uint cv4_signednumericbytes(int value)
  *   p = address where to store value
  *   value = value to store
  */
+@trusted
 void cv4_storesignednumeric(ubyte *p, int value)
 {
     if (value >= 0 && value < 0x8000)
@@ -698,6 +713,7 @@ void cv4_storesignednumeric(ubyte *p, int value)
  * Generate a type index for a parameter list.
  */
 
+@trusted
 idx_t cv4_arglist(type *t,uint *pnparam)
 {   uint u;
     uint nparam;
@@ -888,6 +904,7 @@ private const(char)* cv4_prettyident(Symbol *s)
  *          3   no longer have a key function for class s
  */
 
+@trusted
 idx_t cv4_struct(Classsym *s,int flags)
 {   targ_size_t size;
     debtyp_t* d,dt;
@@ -1608,7 +1625,7 @@ version (SCPP)
 
 version (SCPP)
 {
-
+@trusted
 private uint cv4_enum(Symbol *s)
 {
     debtyp_t* d,dt;
@@ -1738,6 +1755,7 @@ static if (SYMDEB_TDB)
 }
 else
 {
+@trusted
 private uint cv4_fwdenum(type* t)
 {
     Symbol* s = t.Ttag;
@@ -1819,6 +1837,7 @@ private uint cv4_symtypidx(Symbol *s)
 version (SCPP)
 {
 
+@trusted
 private uint cv4_symtypidx(Symbol *s)
 {   type *t;
     debtyp_t *d;
@@ -1893,6 +1912,7 @@ private uint cv4_symtypidx(Symbol *s)
  * Return CV4 type index for a type.
  */
 
+@trusted
 uint cv4_typidx(type *t)
 {   uint typidx;
     uint u;
@@ -1936,6 +1956,7 @@ L1:
             break;
 
         case TYvoid:
+        case TYnoreturn:
         case TYchar:
         case TYschar:
         case TYuchar:
@@ -2384,7 +2405,7 @@ version (MARS)
 
         default:
             debug
-            WRTYxx(tym);
+            printf("%s\n", tym_str(tym));
 
             assert(0);
     }
@@ -2429,6 +2450,7 @@ version (MARS)
  * Write out symbol s.
  */
 
+@trusted
 private void cv4_outsym(Symbol *s)
 {
     uint len;
@@ -2460,8 +2482,8 @@ version (MARS)
 version (SCPP)
 {
         if (CPP && isclassmember(s))            // if method
-        {   Outbuffer buf2;
-
+        {
+            OutBuffer buf2;
             param_tostring(&buf2,s.Stype);
             buf2.prependBytes(cpp_prettyident(s));
             char* s2 = buf2.toString();
@@ -2760,6 +2782,7 @@ Lret:
  * Write out any deferred symbols.
  */
 
+@trusted
 private void cv_outlist()
 {
     while (cgcv.list)
@@ -2770,6 +2793,7 @@ private void cv_outlist()
  * Write out symbol table for current function.
  */
 
+@trusted
 private void cv4_func(Funcsym *s, ref symtab_t symtab)
 {
     int endarg;
@@ -3021,6 +3045,7 @@ else
  * Write out data to .OBJ file.
  */
 
+@trusted
 void cv_term()
 {
     //printf("cv_term(): debtyp.length = %d\n",debtyp.length);
@@ -3107,6 +3132,7 @@ else
  * Write out symbol table for current function.
  */
 
+@trusted
 void cv_func(Funcsym *s)
 {
 version (SCPP)
@@ -3143,6 +3169,7 @@ else
  * Write out symbol table for current function.
  */
 
+@trusted
 void cv_outsym(Symbol *s)
 {
     //printf("cv_outsym('%s')\n",s.Sident.ptr);
@@ -3176,6 +3203,7 @@ version (MARS)
  * Return cv type index for a type.
  */
 
+@trusted
 uint cv_typidx(type *t)
 {   uint ti;
 

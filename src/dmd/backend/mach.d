@@ -1,11 +1,14 @@
-
-/* Mach-O object file format
+/**
+ * Mach-O object file format
+ *
  * Translated to D from mach.h
  */
 
 module dmd.backend.mach;
 
 // Online documentation: https://dlang.org/phobos/dmd_backend_mach.html
+
+@safe:
 
 alias cpu_type_t = int;
 alias cpu_subtype_t = int;

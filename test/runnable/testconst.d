@@ -2860,9 +2860,11 @@ static assert(is(S7038b == shared));
 immutable struct S7038c{ int x; }
 static assert(is(S7038c == immutable));
 
-static assert(!is(C7038 == const));
+// https://issues.dlang.org/show_bug.cgi?id=22515
+// Classes fixed for consistency with structs
+static assert(is(C7038 == const));
 const class C7038{ int x; }
-static assert(!is(C7038 == const));
+static assert(is(C7038 == const));
 
 void test7038()
 {
@@ -2871,7 +2873,7 @@ void test7038()
     static assert(is(typeof(s.x) == const int));
 
     C7038 c;
-    static assert(!is(typeof(c) == const));
+    static assert(is(typeof(c) == const));
     static assert(is(typeof(c.x) == const int));
 }
 
@@ -3254,7 +3256,7 @@ alias immutable(char[vlen10946]) i4; // NG -> OK
 void test9046()
 {
     foreach (T; TypeTuple!(byte, ubyte, short, ushort, int, uint, long, ulong, char, wchar, dchar,
-                           float, double, real, ifloat, idouble, ireal, cfloat, cdouble, creal))
+                           float, double, real))
     foreach (U; TypeTuple!(T, const T, immutable T, shared T, shared const T, inout T, shared inout T))
     {
         static assert(is(typeof(U.init) == U));

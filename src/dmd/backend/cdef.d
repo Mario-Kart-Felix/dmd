@@ -1,9 +1,11 @@
 /**
+ * Configuration enums/variables for different targets
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cdef.d, backend/_cdef.d)
@@ -22,6 +24,7 @@ import dmd.backend.dlist;
 extern (C++):
 @nogc:
 nothrow:
+@safe:
 
 enum VERSION = "9.00.0";        // for banner and imbedding in .OBJ file
 enum VERSIONHEX = "0x900";      // for __DMC__ macro
@@ -118,6 +121,7 @@ else
     enum TARGET_SEGMENTED = TARGET_WINDOS;
 
 
+@trusted
 bool LDOUBLE() { return config.exe == EX_WIN32; }   // support true long doubles
 
 
@@ -298,19 +302,6 @@ alias targ_size_t = uint64_t;     // size_t for the target machine
 bool MFUNC() { return I32 != 0; } // && config.exe == EX_WIN32)       // member functions are TYmfunc
 enum CV3 = 0;          // 1 means support CV3 debug format
 
-/* Object module format
- */
-//#ifndef OMFOBJ
-//#define OMFOBJ          TARGET_WINDOS
-//#endif
-enum ELFOBJ = TARGET_LINUX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS;
-enum MACHOBJ = TARGET_OSX;
-
-version (XVERSION)
-{
-    enum SYMDEB_CODEVIEW = TARGET_WINDOS;
-    enum SYMDEB_DWARF = TARGET_LINUX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS || TARGET_OSX;
-}
 
 //#define TOOLKIT_H
 
@@ -614,6 +605,7 @@ enum
     CFG2expand      = 0x4000,  // expanded output to list file
     CFG2stomp       = 0x8000,  // enable stack stomping code
     CFG2gms         = 0x10000, // optimize debug symbols for microsoft debuggers
+    CFG2genmain     = 0x20000, // main entrypoint is generated
 }
 
 alias config_flags3_t = uint;
@@ -762,16 +754,18 @@ struct Config
     bool useModuleInfo;         // implement ModuleInfo
     bool useTypeInfo;           // implement TypeInfo
     bool useExceptions;         // implement exception handling
+    ubyte dwarf;                // DWARF version
 }
 
 enum THRESHMAX = 0xFFFF;
 
 // Language for error messages
 enum LANG
-{       LANGenglish,
-        LANGgerman,
-        LANGfrench,
-        LANGjapanese,
+{
+    english,
+    german,
+    french,
+    japanese,
 }
 
 // Configuration that is not saved in precompiled header

@@ -1,9 +1,11 @@
 /**
+ * x87 FPU code generation
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1987-1995 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cg87.d, backend/cg87.d)
@@ -39,6 +41,7 @@ import dmd.backend.evalu8 : el_toldoubled;
 extern (C++):
 
 nothrow:
+@safe:
 
 // NOTE: this could be a TLS global which would allow this variable to be used in
 //       a multi-threaded version of the backend
@@ -63,6 +66,7 @@ enum LOG2E         = 1.4426950408889634074;   // 1/LN2
 enum FWAIT = 0x9B;            // FWAIT opcode
 
 /* Mark variable referenced by e as not a register candidate            */
+@trusted
 uint notreg(elem* e) { return e.EV.Vsym.Sflags &= ~GTregcand; }
 
 /* Generate the appropriate ESC instruction     */
@@ -88,6 +92,8 @@ struct Dconst
 private __gshared Dconst oldd;
 
 enum NDPP = 0;       // print out debugging info
+
+@trusted
 bool NOSAHF() { return I64 || config.fpxmmregs; }     // can't use SAHF instruction
 
 enum CW_roundto0 = 0xFBF;
@@ -99,6 +105,7 @@ enum CW_roundtonearest = 0x3BF;
  * about the save into an array of NDP structs.
  */
 
+@trusted
 private void getlvalue87(ref CodeBuilder cdb,code *pcs,elem *e,regm_t keepmsk)
 {
     // the x87 instructions cannot read XMM registers
@@ -118,6 +125,7 @@ private void getlvalue87(ref CodeBuilder cdb,code *pcs,elem *e,regm_t keepmsk)
  * Store/load to ndp save location i
  */
 
+@trusted
 private void ndp_fstp(ref CodeBuilder cdb, int i, tym_t ty)
 {
     switch (tybasic(ty))
@@ -146,6 +154,7 @@ private void ndp_fstp(ref CodeBuilder cdb, int i, tym_t ty)
     }
 }
 
+@trusted
 private void ndp_fld(ref CodeBuilder cdb, int i, tym_t ty)
 {
     switch (tybasic(ty))
@@ -178,6 +187,7 @@ private void ndp_fld(ref CodeBuilder cdb, int i, tym_t ty)
  * Return index of empty slot in global87.save[].
  */
 
+@trusted
 private int getemptyslot()
 {
     int i;
@@ -196,6 +206,7 @@ private int getemptyslot()
 
 void pop87() { pop87(__LINE__, __FILE__); }
 
+@trusted
 void pop87(int line, const(char)* file)
 {
     int i;
@@ -219,6 +230,7 @@ void pop87(int line, const(char)* file)
 
 void push87(ref CodeBuilder cdb) { push87(cdb,__LINE__,__FILE__); }
 
+@trusted
 void push87(ref CodeBuilder cdb, int line, const(char)* file)
 {
     // if we would lose the top register off of the stack
@@ -253,6 +265,7 @@ void note87(elem *e, uint offset, int i)
     note87(e, offset, i, __LINE__);
 }
 
+@trusted
 void note87(elem *e, uint offset, int i, int linnum)
 {
     if (NDPP)
@@ -281,6 +294,7 @@ void note87(elem *e, uint offset, int i, int linnum)
  * Exchange two entries in 8087 stack.
  */
 
+@trusted
 void xchg87(int i, int j)
 {
     NDP save;
@@ -302,6 +316,7 @@ private void makesure87(ref CodeBuilder cdb,elem *e,uint offset,int i,uint flag)
     makesure87(cdb,e,offset,i,flag,__LINE__);
 }
 
+@trusted
 private void makesure87(ref CodeBuilder cdb,elem *e,uint offset,int i,uint flag,int linnum)
 {
     debug if (NDPP) printf("makesure87(e=%p, offset=%d, i=%d, flag=%d, line=%d)\n",e,offset,i,flag,linnum);
@@ -353,6 +368,7 @@ L1:
  * Save in memory any values in the 8087 that we want to keep.
  */
 
+@trusted
 void save87(ref CodeBuilder cdb)
 {
     bool any = false;
@@ -376,6 +392,7 @@ void save87(ref CodeBuilder cdb)
  * Save any noted values that would be destroyed by n pushes
  */
 
+@trusted
 void save87regs(ref CodeBuilder cdb, uint n)
 {
     assert(n <= 7);
@@ -410,6 +427,7 @@ void save87regs(ref CodeBuilder cdb, uint n)
  * Save/restore ST0 or ST01
  */
 
+@trusted
 void gensaverestore87(regm_t regm, ref CodeBuilder cdbsave, ref CodeBuilder cdbrestore)
 {
     //printf("gensaverestore87(%s)\n", regm_str(regm));
@@ -438,6 +456,7 @@ void gensaverestore87(regm_t regm, ref CodeBuilder cdbsave, ref CodeBuilder cdbr
  * Find which, if any, slot on stack holds elem e.
  */
 
+@trusted
 private int cse_get(elem *e, uint offset)
 {
     int i;
@@ -520,6 +539,7 @@ void genfwait(ref CodeBuilder cdb)
  * Put the 8087 flags into the CPU flags.
  */
 
+@trusted
 private void cg87_87topsw(ref CodeBuilder cdb)
 {
     /* Note that SAHF is not available on some early I64 processors
@@ -543,6 +563,7 @@ private void cg87_87topsw(ref CodeBuilder cdb)
  * Jump to ctarget if condition code C2 is set.
  */
 
+@trusted
 private void genjmpifC2(ref CodeBuilder cdb, code *ctarget)
 {
     if (NOSAHF)
@@ -567,6 +588,7 @@ private void genjmpifC2(ref CodeBuilder cdb, code *ctarget)
  *      start of code appended to c.
  */
 
+@trusted
 private void genftst(ref CodeBuilder cdb,elem *e,int pop)
 {
     if (NOSAHF)
@@ -627,6 +649,7 @@ private void genftst(ref CodeBuilder cdb,elem *e,int pop)
  *      0 if not
  */
 
+@trusted
 ubyte loadconst(elem *e, int im)
 {
     elem_debug(e);
@@ -770,8 +793,8 @@ ubyte loadconst(elem *e, int im)
  * generate necessary code to return result in *pretregs.
  */
 
-
-void fixresult87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs)
+@trusted
+void fixresult87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs, bool isReturnValue = false)
 {
     //printf("fixresult87(e = %p, retregs = x%x, *pretregs = x%x)\n", e,retregs,*pretregs);
     //printf("fixresult87(e = %p, retregs = %s, *pretregs = %s)\n", e,regm_str(retregs),regm_str(*pretregs));
@@ -779,7 +802,7 @@ void fixresult87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs)
 
     if ((*pretregs | retregs) & mST01)
     {
-        fixresult_complex87(cdb, e, retregs, pretregs);
+        fixresult_complex87(cdb, e, retregs, pretregs, isReturnValue);
         return;
     }
 
@@ -930,6 +953,7 @@ void fixresult87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs)
 // Reverse the order that the op is done in
 __gshared const ubyte[9] oprev = [ cast(ubyte)-1,0,1,2,3,5,4,7,6 ];
 
+@trusted
 void orth87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("orth87(+e = %p, *pretregs = %s)\n", e, regm_str(*pretregs));
@@ -1559,6 +1583,7 @@ void orth87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Load e into ST01.
  */
 
+@trusted
 private void loadComplex(ref CodeBuilder cdb,elem *e)
 {
     regm_t retregs;
@@ -1607,6 +1632,7 @@ private void loadComplex(ref CodeBuilder cdb,elem *e)
  * Must follow same logic as cmporder87();
  */
 
+@trusted
 void load87(ref CodeBuilder cdb,elem *e,uint eoffset,regm_t *pretregs,elem *eleft,OPER op)
 {
     code cs;
@@ -1629,6 +1655,7 @@ void load87(ref CodeBuilder cdb,elem *e,uint eoffset,regm_t *pretregs,elem *elef
     OPER opr = oprev[op + 1];
     tym_t ty = tybasic(e.Ety);
     uint mf = (ty == TYfloat || ty == TYifloat || ty == TYcfloat) ? MFfloat : MFdouble;
+    bool noted = false;
     if ((ty == TYldouble || ty == TYildouble) &&
         op != -1 && e.Eoper != OPd_ld)
         goto Ldefault;
@@ -1636,6 +1663,11 @@ L5:
     switch (e.Eoper)
     {
         case OPcomma:
+            if (op != -1)
+            {
+                note87(eleft,eoffset,0);
+                noted = true;
+            }
             docommas(cdb,&e);
             goto L5;
 
@@ -1695,7 +1727,7 @@ L5:
         case OPd_ld:
             mf1 = (tybasic(e.EV.E1.Ety) == TYfloat || tybasic(e.EV.E1.Ety) == TYifloat)
                     ? MFfloat : MFdouble;
-            if (op != -1 && global87.stackused)
+            if (op != -1 && global87.stackused && !noted)
                 note87(eleft,eoffset,0);    // don't trash this value
             if (e.EV.E1.Eoper == OPvar || e.EV.E1.Eoper == OPind)
             {
@@ -1806,7 +1838,7 @@ L5:
             /* (probably shouldn't be for 16 bit code too)  */
             assert(!I32);
 
-            if (op != -1)
+            if (op != -1 && !noted)
                 note87(eleft,eoffset,0);    // don't trash this value
             retregs = ALLREGS & mLSW;
             codelem(cdb,e.EV.E1,&retregs,false);
@@ -1821,7 +1853,7 @@ L5:
         L6:
             if (e.Ecount)
                 goto Ldefault;
-            if (op != -1)
+            if (op != -1 && !noted)
                 note87(eleft,eoffset,0);    // don't trash this value
             if (e.EV.E1.Eoper == OPvar ||
                 (e.EV.E1.Eoper == OPind && e.EV.E1.Ecount == 0))
@@ -1891,6 +1923,7 @@ L5:
  * Must follow same logic as load87().
  */
 
+@trusted
 int cmporder87(elem *e)
 {
     //printf("cmporder87(%p)\n",e);
@@ -1948,6 +1981,7 @@ ret0:
  * Perform an assignment to a long double/double/float.
  */
 
+@trusted
 void eq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -2062,6 +2096,7 @@ void eq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Perform an assignment to a long double/double/float.
  */
 
+@trusted
 void complex_eq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -2181,6 +2216,7 @@ void complex_eq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * i.e. handle (e1 = (int) e2)
  */
 
+@trusted
 private void cnvteq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -2231,6 +2267,7 @@ private void cnvteq87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Perform +=, -=, *= and /= for doubles.
  */
 
+@trusted
 void opass87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -2254,9 +2291,9 @@ void opass87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         case TYcdouble:
         case TYcldouble:
             if (e.Eoper == OPmodass)
-               opmod_complex87(cdb, e, pretregs);
+                opmod_complex87(cdb, e, pretregs);
             else
-               opass_complex87(cdb, e, pretregs);
+                opass_complex87(cdb, e, pretregs);
             return;
 
         default:
@@ -2364,6 +2401,7 @@ void opass87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Perform %= where E1 is complex and E2 is real or imaginary.
  */
 
+@trusted
 private void opmod_complex87(ref CodeBuilder cdb, elem *e,regm_t *pretregs)
 {
 
@@ -2449,6 +2487,7 @@ private void opmod_complex87(ref CodeBuilder cdb, elem *e,regm_t *pretregs)
  * Perform +=, -=, *= and /= for the lvalue being complex.
  */
 
+@trusted
 private void opass_complex87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs;
@@ -2744,6 +2783,7 @@ private void opass_complex87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * OPnegass
  */
 
+@trusted
 void cdnegass87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs;
@@ -2818,6 +2858,7 @@ void cdnegass87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Take care of OPpostinc and OPpostdec.
  */
 
+@trusted
 void post87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     uint op;
@@ -2908,6 +2949,7 @@ void cdd_u64(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
         cdd_u64_I64(cdb, e, pretregs);
 }
 
+@trusted
 private void cdd_u64_I32(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     /* Generate:
@@ -2992,6 +3034,7 @@ private void cdd_u64_I32(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
     fixresult(cdb,e,retregs,pretregs);
 }
 
+@trusted
 private void cdd_u64_I64(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     /* Generate:
@@ -3083,6 +3126,7 @@ private void cdd_u64_I64(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Do the following opcodes:
  *      OPd_u32
  */
+@trusted
 void cdd_u32(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     assert(I32 || I64);
@@ -3128,6 +3172,7 @@ void cdd_u32(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  *      OPd_s64
  */
 
+@trusted
 void cnvt87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs;
@@ -3281,6 +3326,7 @@ void cnvt87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Do OPrndtol.
  */
 
+@trusted
 void cdrndtol(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     if (*pretregs == 0)
@@ -3338,6 +3384,7 @@ void cdrndtol(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Do OPscale, OPyl2x, OPyl2xp1.
  */
 
+@trusted
 void cdscale(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(*pretregs != 0);
@@ -3374,6 +3421,7 @@ void cdscale(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Unary -, absolute value, square root, sine, cosine
  */
 
+@trusted
 void neg87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("neg87()\n");
@@ -3400,6 +3448,7 @@ void neg87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Unary - for complex operands
  */
 
+@trusted
 void neg_complex87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(e.Eoper == OPneg);
@@ -3415,6 +3464,7 @@ void neg_complex87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 /*********************************
  */
 
+@trusted
 void cdind87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdind87(e = %p, *pretregs = %s)\n",e,regm_str(*pretregs));
@@ -3454,6 +3504,7 @@ void cdind87(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Reset statics for another .obj file.
  */
 
+@trusted
 void cg87_reset()
 {
     memset(&oldd,0,oldd.sizeof);
@@ -3464,6 +3515,7 @@ void cg87_reset()
  * Initialize control word constants.
  */
 
+@trusted
 private void genrnd(ref CodeBuilder cdb, short cw)
 {
     if (config.flags3 & CFG3pic)
@@ -3509,6 +3561,7 @@ private void genrnd(ref CodeBuilder cdb, short cw)
  *      pop     if stack should be popped after test
  */
 
+@trusted
 private void genctst(ref CodeBuilder cdb,elem *e,int pop)
 {
     assert(pop == 0 || pop == 1);
@@ -3603,8 +3656,8 @@ private void genctst(ref CodeBuilder cdb,elem *e,int pop)
  * generate necessary code to return result in *pretregs.
  */
 
-
-void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs)
+@trusted
+void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs, bool isReturnValue = false)
 {
     static if (0)
     {
@@ -3615,6 +3668,17 @@ void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pret
     assert(!*pretregs || retregs);
     tym_t tym = tybasic(e.Ety);
     uint sz = _tysize[tym];
+
+    if (isReturnValue)
+    {
+        // In loadComplex and complex_eq87, complex numbers have the real part
+        // pushed to the FPU stack first (ST1), then the imaginary part (ST0).
+        // However, the Intel 64 bit ABI scheme requires that types classified
+        // as complex x87 instead have the real part returned in ST0, and the
+        // imaginary part in ST1.
+        if (retregs == mST01 && I64 && (config.exe & EX_posix))
+            cdb.genf2(0xD9, 0xC8 + 1);          // FXCH ST(1)
+    }
 
     if (*pretregs == 0 && retregs == mST01)
     {
@@ -3721,6 +3785,7 @@ void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pret
  * Operators OPc_r and OPc_i
  */
 
+@trusted
 void cdconvt87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     regm_t retregs = mST01;
@@ -3748,6 +3813,7 @@ void cdconvt87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Load complex operand into ST01 or flags or both.
  */
 
+@trusted
 void cload87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     //printf("e = %p, *pretregs = %s)\n", e, regm_str(*pretregs));
@@ -3848,6 +3914,7 @@ void cload87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 /**********************************************
  * Load OPpair or OPrpair into mST01
  */
+@trusted
 void loadPair87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     assert(e.Eoper == OPpair || e.Eoper == OPrpair);
@@ -3866,6 +3933,7 @@ void loadPair87(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Round 80 bit precision to 32 or 64 bits.
  * OPtoprec
  */
+@trusted
 void cdtoprec(ref CodeBuilder cdb, elem* e, regm_t* pretregs)
 {
     //printf("cdtoprec: *pretregs = %s\n", regm_str(*pretregs));

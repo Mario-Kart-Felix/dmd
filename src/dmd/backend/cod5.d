@@ -1,9 +1,13 @@
 /**
+ * Code generation 5
+ *
+ * Handles finding out which blocks need a function prolog / epilog attached
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1995-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cod5.d, backend/cod5.d)
@@ -35,15 +39,15 @@ import dmd.backend.ty;
 extern(C++):
 
 nothrow:
+@safe:
 
-private void pe_add(block *b);
-private int need_prolog(block *b);
 
 /********************************************************
  * Determine which blocks get the function prolog and epilog
  * attached to them.
  */
 
+@trusted
 void cod5_prol_epi()
 {
 static if(1)
@@ -158,6 +162,7 @@ else
  * No prolog/epilog optimization.
  */
 
+@trusted
 void cod5_noprol()
 {
     block *b;
@@ -198,6 +203,7 @@ private void pe_add(block *b)
  * Determine if block needs the function prolog to be set up.
  */
 
+@trusted
 private int need_prolog(block *b)
 {
     if (b.Bregcon.used & fregsaved)

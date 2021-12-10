@@ -36,7 +36,7 @@
  * are valid D identifier.
  *
  * See_Also:    https://github.com/dlang/dmd/pull/10031
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/nspace.d, _nspace.d)
@@ -131,7 +131,8 @@ extern (C++) final class Nspace : ScopeDsymbol
 
         if (!members || !symtab) // opaque or semantic() is not yet called
         {
-            error("is forward referenced when looking for `%s`", ident.toChars());
+            if (!(flags & IgnoreErrors))
+                error("is forward referenced when looking for `%s`", ident.toChars());
             return null;
         }
 
@@ -144,12 +145,12 @@ extern (C++) final class Nspace : ScopeDsymbol
         return members.foreachDsymbol( (s) { return s.hasPointers(); } ) != 0;
     }
 
-    override void setFieldOffset(AggregateDeclaration ad, uint* poffset, bool isunion)
+    override void setFieldOffset(AggregateDeclaration ad, ref FieldState fieldState, bool isunion)
     {
         //printf("Nspace::setFieldOffset() %s\n", toChars());
         if (_scope) // if fwd reference
             dsymbolSemantic(this, null); // try to resolve it
-        members.foreachDsymbol( s => s.setFieldOffset(ad, poffset, isunion) );
+        members.foreachDsymbol( s => s.setFieldOffset(ad, fieldState, isunion) );
     }
 
     override const(char)* kind() const

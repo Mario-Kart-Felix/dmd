@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/class.html#alias-this, Alias This)
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/aliasthis.d, _aliasthis.d)
@@ -72,20 +72,35 @@ extern (C++) final class AliasThis : Dsymbol
     }
 }
 
-Expression resolveAliasThis(Scope* sc, Expression e, bool gag = false)
+/*************************************
+ * Find the `alias this` symbol of e's type.
+ * Params:
+ *      sc = context
+ *      e = expression forming the `this`
+ *      gag = if true do not print errors, return null instead
+ *      findOnly = don't do further processing like resolving properties,
+ *                 i.e. just return plain dotExp() result.
+ * Returns:
+ *      Expression that is `e.aliasthis`
+ */
+Expression resolveAliasThis(Scope* sc, Expression e, bool gag = false, bool findOnly = false)
 {
+    import dmd.typesem : dotExp;
     for (AggregateDeclaration ad = isAggregate(e.type); ad;)
     {
         if (ad.aliasthis)
         {
-            uint olderrors = gag ? global.startGagging() : 0;
             Loc loc = e.loc;
-            Type tthis = (e.op == TOK.type ? e.type : null);
-            e = new DotIdExp(loc, e, ad.aliasthis.ident);
-            e = e.expressionSemantic(sc);
+            Type tthis = (e.op == EXP.type ? e.type : null);
+            const flags = DotExpFlag.noAliasThis | (gag ? DotExpFlag.gag : 0);
+            uint olderrors = gag ? global.startGagging() : 0;
+            e = dotExp(e.type, sc, e, ad.aliasthis.ident, flags);
+            if (!e || findOnly)
+                return gag && global.endGagging(olderrors) ? null : e;
+
             if (tthis && ad.aliasthis.sym.needThis())
             {
-                if (e.op == TOK.variable)
+                if (e.op == EXP.variable)
                 {
                     if (auto fd = (cast(VarExp)e).var.isFuncDeclaration())
                     {
@@ -179,5 +194,24 @@ bool checkDeprecatedAliasThis(AliasThis at, const ref Loc loc, Scope* sc)
 
         return true;
     }
+    return false;
+}
+
+/**************************************
+ * Check and set 'att' if 't' is a recursive 'alias this' type
+ * Params:
+ *   att = type reference used to detect recursion
+ *   t   = 'alias this' type
+ *
+ * Returns:
+ *   Whether the 'alias this' is recursive or not
+ */
+bool isRecursiveAliasThis(ref Type att, Type t)
+{
+    auto tb = t.toBasetype();
+    if (att && tb.equivalent(att))
+        return true;
+    else if (!att && tb.checkAliasThisRec())
+        att = tb;
     return false;
 }

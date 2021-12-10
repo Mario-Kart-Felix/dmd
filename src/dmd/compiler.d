@@ -1,7 +1,7 @@
 /**
  * Describes a back-end compiler and implements compiler-specific actions.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/compiler.d, _compiler.d)
@@ -12,6 +12,7 @@
 module dmd.compiler;
 
 import dmd.astcodegen;
+import dmd.astenums;
 import dmd.arraytypes;
 import dmd.dmodule;
 import dmd.dscope;
@@ -37,9 +38,6 @@ version (DMDLIB)
 
 extern (C++) __gshared
 {
-    /// Module in which the D main is
-    Module rootHasMain = null;
-
     bool includeImports = false;
     // array of module patterns used to include/exclude imported modules
     Array!(const(char)*) includeModulePatterns;

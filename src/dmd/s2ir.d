@@ -1,7 +1,7 @@
 /**
  * Convert statements to Intermediate Representation (IR) for the back-end.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/tocsym.d, _s2ir.d)
@@ -22,6 +22,7 @@ import dmd.root.rmem;
 import dmd.root.rootobject;
 
 import dmd.aggregate;
+import dmd.astenums;
 import dmd.dclass;
 import dmd.declaration;
 import dmd.denum;
@@ -87,6 +88,21 @@ private void srcpos_setLoc(ref Srcpos s, const ref Loc loc) pure nothrow
     s.set(loc.filename, loc.linnum, loc.charnum);
 }
 
+private bool isAssertFalse(const Expression e) nothrow
+{
+    return e ? e.type == Type.tnoreturn && (e.op == EXP.halt || e.op == EXP.assert_) : false;
+}
+
+private bool isAssertFalse(const Statement s) nothrow
+{
+    if (!s)
+        return false;
+    if (auto es = s.isExpStatement())
+        return isAssertFalse(es.exp);
+    else if (auto ss = s.isScopeStatement())
+        return isAssertFalse(ss.statement);
+    return false;
+}
 
 /***********************************************
  * Generate code to set index into scope table.
@@ -532,7 +548,8 @@ private extern (C++) class S2irVisitor : Visitor
         if (bsw.BC == BCswitch)
             bsw.appendSucc(cb);   // second entry in pair
         bcase.appendSucc(cb);
-        incUsage(irs, s.loc);
+        if (!isAssertFalse(s.statement))
+            incUsage(irs, s.loc);
         if (s.statement)
             Statement_toIR(s.statement, irs, stmtstate);
     }
@@ -544,7 +561,8 @@ private extern (C++) class S2irVisitor : Visitor
         block *bdefault = stmtstate.getDefaultBlock();
         block_next(blx,BCgoto,bdefault);
         bcase.appendSucc(blx.curblock);
-        incUsage(irs, s.loc);
+        if (!isAssertFalse(s.statement))
+            incUsage(irs, s.loc);
         if (s.statement)
             Statement_toIR(s.statement, irs, stmtstate);
     }
@@ -628,7 +646,7 @@ private extern (C++) class S2irVisitor : Visitor
                  */
                 else if (auto ce = s.exp.isCallExp())
                 {
-                    if (ce.e1.op == TOK.variable || ce.e1.op == TOK.star)
+                    if (ce.e1.op == EXP.variable || ce.e1.op == EXP.star)
                     {
                         Type t = ce.e1.type.toBasetype();
                         if (t.ty == Tdelegate)
@@ -742,10 +760,16 @@ private extern (C++) class S2irVisitor : Visitor
         //printf("ExpStatement.toIR(), exp: %p %s\n", s.exp, s.exp ? s.exp.toChars() : "");
         if (s.exp)
         {
-            if (s.exp.hasCode)
+            if (s.exp.hasCode &&
+                !(isAssertFalse(s.exp))) // `assert(0)` not meant to be covered
                 incUsage(irs, s.loc);
 
             block_appendexp(blx.curblock, toElemDtor(s.exp, irs));
+
+            // goto the next block
+            block* b = blx.curblock;
+            block_next(blx, BCgoto, null);
+            b.appendSucc(blx.curblock);
         }
     }
 
@@ -829,7 +853,7 @@ private extern (C++) class S2irVisitor : Visitor
     override void visit(WithStatement s)
     {
         //printf("WithStatement.toIR()\n");
-        if (s.exp.op == TOK.scope_ || s.exp.op == TOK.type)
+        if (s.exp.op == EXP.scope_ || s.exp.op == EXP.type)
         {
         }
         else
@@ -865,7 +889,7 @@ private extern (C++) class S2irVisitor : Visitor
 
         incUsage(irs, s.loc);
         elem *e = toElemDtor(s.exp, irs);
-        const int rtlthrow = config.ehmethod == EHmethod.EH_DWARF ? RTLSYM_THROWDWARF : RTLSYM_THROWC;
+        const rtlthrow = config.ehmethod == EHmethod.EH_DWARF ? RTLSYM.THROWDWARF : RTLSYM.THROWC;
         e = el_bin(OPcall, TYvoid, el_var(getRtlsym(rtlthrow)),e);
         block_appendexp(blx.curblock, e);
         block_next(blx, BCexit, null);          // throw never returns
@@ -967,7 +991,7 @@ private extern (C++) class S2irVisitor : Visitor
             else
             {
                 //  jcatchvar = __dmd_catch_begin(__exception_object);
-                elem *ebegin = el_var(getRtlsym(RTLSYM_BEGIN_CATCH));
+                elem *ebegin = el_var(getRtlsym(RTLSYM.BEGIN_CATCH));
                 elem *e = el_bin(OPcall, TYnptr, ebegin, el_var(seo));
                 elem *e3 = el_bin(OPeq, TYvoid, el_var(tryblock.jcatchvar), e);
             }
@@ -1011,7 +1035,7 @@ private extern (C++) class S2irVisitor : Visitor
                     if (i == 0)
                     {
                         // rewrite ebegin to use __cxa_begin_catch
-                        Symbol *s2 = getRtlsym(RTLSYM_CXA_BEGIN_CATCH);
+                        Symbol *s2 = getRtlsym(RTLSYM.CXA_BEGIN_CATCH);
                         ebegin.EV.Vsym = s2;
                     }
                 }
@@ -1107,7 +1131,7 @@ private extern (C++) class S2irVisitor : Visitor
                 tryblock.appendSucc(bcatch);
                 block_goto(blx, BCjcatch, null);
 
-                if (cs.type && irs.params.targetOS == TargetOS.Windows && irs.params.is64bit) // Win64
+                if (cs.type && irs.target.os == Target.OS.Windows && irs.target.is64bit) // Win64
                 {
                     /* The linker will attempt to merge together identical functions,
                      * even if the catch types differ. So add a reference to the
@@ -1251,7 +1275,7 @@ private extern (C++) class S2irVisitor : Visitor
             /* Add code to BC_ret block:
              *  (!_flag && _Unwind_Resume(exception_object));
              */
-            elem *eu = el_bin(OPcall, TYvoid, el_var(getRtlsym(RTLSYM_UNWIND_RESUME)), el_var(seo));
+            elem *eu = el_bin(OPcall, TYvoid, el_var(getRtlsym(RTLSYM.UNWIND_RESUME)), el_var(seo));
             eu = el_bin(OPandand, TYvoid, el_una(OPnot, TYbool, el_var(sflag)), eu);
             assert(!retblock.Belem);
             retblock.Belem = eu;

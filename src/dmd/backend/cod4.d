@@ -1,11 +1,19 @@
 /**
+ * Code generation 4
+ *
+ * Includes:
+ * - assignemt variations of operators (+= -= *= /= %= <<= >>=)
+ * - integer comparison (< > <= >=)
+ * - converting integers to a different size (e.g. short to int)
+ * - bit instructions (bit scan, population count)
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Mostly code generation for assignment operators.
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cod4.d, backend/cod4.d)
@@ -43,6 +51,7 @@ import dmd.backend.xmm;
 extern (C++):
 
 nothrow:
+@safe:
 
 int REGSIZE();
 
@@ -65,6 +74,7 @@ extern (C)
  * Return number of times symbol s appears in tree e.
  */
 
+@trusted
 private int intree(Symbol *s,elem *e)
 {
     if (!OTleaf(e.Eoper))
@@ -81,6 +91,7 @@ private int intree(Symbol *s,elem *e)
  *      0       can't
  */
 
+@trusted
 int doinreg(Symbol *s, elem *e)
 {
     int in_ = 0;
@@ -143,7 +154,7 @@ void modEA(ref CodeBuilder cdb,code *c)
 /****************************
  * Gen code for op= for doubles.
  */
-
+@trusted
 private void opassdbl(ref CodeBuilder cdb,elem *e,regm_t *pretregs,OPER op)
 {
     assert(config.exe & EX_windos);  // for targets that may not have an 8087
@@ -244,6 +255,7 @@ private void opassdbl(ref CodeBuilder cdb,elem *e,regm_t *pretregs,OPER op)
  * Gen code for OPnegass for doubles.
  */
 
+@trusted
 private void opnegassdbl(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(config.exe & EX_windos);  // for targets that may not have an 8087
@@ -354,6 +366,7 @@ private void opnegassdbl(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for an assignment.
  */
 
+@trusted
 void cdeq(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     tym_t tymll;
@@ -850,6 +863,7 @@ Lp:
  * Generate code for += -= &= |= ^= negass
  */
 
+@trusted
 void cdaddass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdaddass(e=%p, *pretregs = %s)\n",e,regm_str(*pretregs));
@@ -1394,6 +1408,7 @@ void cdaddass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for *=
  */
 
+@trusted
 void cdmulass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -1687,6 +1702,7 @@ void cdmulass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for /= %=
  */
 
+@trusted
 void cddivass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     elem *e1 = e.EV.E1;
@@ -2268,6 +2284,7 @@ void cddivass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for <<= and >>=
  */
 
+@trusted
 void cdshass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     code cs;
@@ -2517,6 +2534,7 @@ void cdshass(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Handles lt,gt,le,ge,eqeq,ne for all data types.
  */
 
+@trusted
 void cdcmp(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs,rretregs;
@@ -3193,6 +3211,7 @@ ret:
  *      targ    block* or code*
  */
 
+@trusted
 void longcmp(ref CodeBuilder cdb,elem *e,bool jcond,uint fltarg,code *targ)
 {
                                          // <=  >   <   >=
@@ -3356,6 +3375,7 @@ void longcmp(ref CodeBuilder cdb,elem *e,bool jcond,uint fltarg,code *targ)
  * Depends on OPd_s32 and CLIB.dbllng being in sequence.
  */
 
+@trusted
 void cdcnvt(ref CodeBuilder cdb,elem *e, regm_t *pretregs)
 {
     //printf("cdcnvt: %p *pretregs = %s\n", e, regm_str(*pretregs));
@@ -3576,6 +3596,7 @@ L1:
  * OPu64_128, OPs64_128
  */
 
+@trusted
 void cdshtlng(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     reg_t reg;
@@ -3811,6 +3832,7 @@ void cdshtlng(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * For OPu8_16 and OPs8_16.
  */
 
+@trusted
 void cdbyteint(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs;
@@ -3948,6 +3970,7 @@ void cdbyteint(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * OP128_64
  */
 
+@trusted
 void cdlngsht(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     debug
@@ -4000,8 +4023,7 @@ void cdlngsht(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
     debug
     if (!(!*pretregs || retregs))
     {
-        WROP(e.Eoper),
-        printf(" *pretregs = %s, retregs = %s, e = %p\n",regm_str(*pretregs),regm_str(retregs),e);
+        printf("%s *pretregs = %s, retregs = %s, e = %p\n",oper_str(e.Eoper),regm_str(*pretregs),regm_str(retregs),e);
     }
 
     assert(!*pretregs || retregs);
@@ -4015,6 +4037,7 @@ void cdlngsht(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * OPmsw
  */
 
+@trusted
 void cdmsw(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(e.Eoper == OPmsw);
@@ -4034,8 +4057,8 @@ void cdmsw(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 
     debug
     if (!(!*pretregs || retregs))
-    {   WROP(e.Eoper);
-        printf(" *pretregs = %s, retregs = %s\n",regm_str(*pretregs),regm_str(retregs));
+    {
+        printf("%s *pretregs = %s, retregs = %s\n",oper_str(e.Eoper),regm_str(*pretregs),regm_str(retregs));
         elem_print(e);
     }
 
@@ -4049,6 +4072,7 @@ void cdmsw(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Handle operators OPinp and OPoutp.
  */
 
+@trusted
 void cdport(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdport\n");
@@ -4099,6 +4123,7 @@ void cdport(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for an asm elem.
  */
 
+@trusted
 void cdasm(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     // Assume only regs normally destroyed by a function are destroyed
@@ -4111,6 +4136,7 @@ void cdasm(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for OPnp_f16p and OPf16p_np.
  */
 
+@trusted
 void cdfar16(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     code *cnop;
@@ -4184,6 +4210,7 @@ void cdfar16(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for OPbtst
  */
 
+@trusted
 void cdbtst(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     regm_t retregs;
@@ -4321,6 +4348,7 @@ void cdbtst(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for OPbt, OPbtc, OPbtr, OPbts
  */
 
+@trusted
 void cdbt(ref CodeBuilder cdb,elem *e, regm_t *pretregs)
 {
     //printf("cdbt(%p, %s)\n", e, regm_str(*pretregs));
@@ -4439,6 +4467,7 @@ void cdbt(ref CodeBuilder cdb,elem *e, regm_t *pretregs)
  * Generate code for OPbsf and OPbsr.
  */
 
+@trusted
 void cdbscan(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     //printf("cdbscan()\n");
@@ -4491,6 +4520,7 @@ void cdbscan(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * OPpopcnt operator
  */
 
+@trusted
 void cdpopcnt(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdpopcnt()\n");
@@ -4549,6 +4579,7 @@ void cdpopcnt(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for OPpair, OPrpair.
  */
 
+@trusted
 void cdpair(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     if (*pretregs == 0)                         // if don't want result
@@ -4560,6 +4591,7 @@ void cdpair(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
     }
 
     //printf("\ncdpair(e = %p, *pretregs = %s)\n", e, regm_str(*pretregs));
+    //WRTYxx(e.Ety);printf("\n");
     //printf("Ecount = %d\n", e.Ecount);
 
     regm_t retregs = *pretregs;
@@ -4605,7 +4637,6 @@ void cdpair(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 
     codelem(cdb,e.EV.E1, &regs1, false);
     scodelem(cdb,e.EV.E2, &regs2, regs1, false);
-    //printf("2: regs1 = %s, regs2 = %s\n", regm_str(regs1), regm_str(regs2));
 
     if (e.EV.E1.Ecount)
         getregs(cdb,regs1);
@@ -4619,6 +4650,7 @@ void cdpair(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for OPcmpxchg
  */
 
+@trusted
 void cdcmpxchg(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     /* The form is:
@@ -4709,6 +4741,7 @@ void cdcmpxchg(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for OPprefetch
  */
 
+@trusted
 void cdprefetch(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     /* Generate the following based on e2:
@@ -4757,6 +4790,7 @@ void cdprefetch(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  *      reg = set to register loaded from EA
  *      retregs = register candidates for reg
  */
+@trusted
 private
 void opAssLoadReg(ref CodeBuilder cdb, ref code cs, elem* e, out reg_t reg, regm_t retregs)
 {
@@ -4779,6 +4813,7 @@ void opAssLoadReg(ref CodeBuilder cdb, ref code cs, elem* e, out reg_t reg, regm
  *      retregs = register candidates for rhi, rlo
  *      keepmsk = registers to not modify
  */
+@trusted
 private
 void opAssLoadPair(ref CodeBuilder cdb, ref code cs, elem* e, out reg_t rhi, out reg_t rlo, regm_t retregs, regm_t keepmsk)
 {
@@ -4809,6 +4844,7 @@ void opAssLoadPair(ref CodeBuilder cdb, ref code cs, elem* e, out reg_t rhi, out
  *      reg = register of result
  *      pretregs = registers to store result in
  */
+@trusted
 private
 void opAssStoreReg(ref CodeBuilder cdb, ref code cs, elem* e, reg_t reg, regm_t* pretregs)
 {
@@ -4835,6 +4871,7 @@ void opAssStoreReg(ref CodeBuilder cdb, ref code cs, elem* e, reg_t reg, regm_t*
  *      rlo = least significant register of the pair
  *      pretregs = registers to store result in
  */
+@trusted
 private
 void opAssStorePair(ref CodeBuilder cdb, ref code cs, elem* e, reg_t rhi, reg_t rlo, regm_t* pretregs)
 {

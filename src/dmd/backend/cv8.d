@@ -1,15 +1,17 @@
 /**
+ * CodeView 8 symbolic debug info generation
+ *
+ * This module generates the `.debug$S` and ``.debug$T` sections for Win64,
+ * which are the MS-Coff symbolic debug info and type debug info sections.
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
- * Copyright:    Copyright (C) 2012-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:    Copyright (C) 2012-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cv8.d, backend/cv8.d)
  */
-
-// This module generates the .debug$S and .debug$T sections for Win64,
-// which are the MS-Coff symbolic debug info and type debug info sections.
 
 module dmd.backend.cv8;
 
@@ -38,7 +40,7 @@ import dmd.backend.exh;
 import dmd.backend.global;
 import dmd.backend.obj;
 import dmd.backend.oper;
-import dmd.backend.outbuf;
+import dmd.common.outbuffer;
 import dmd.backend.rtlsym;
 import dmd.backend.ty;
 import dmd.backend.type;
@@ -48,6 +50,7 @@ import dmd.backend.xmm;
 extern (C++):
 
 nothrow:
+@safe:
 
 static if (1)
 {
@@ -55,6 +58,7 @@ static if (1)
 int REGSIZE();
 
 // Determine if this Symbol is stored in a COMDAT
+@trusted
 private bool symbol_iscomdat4(Symbol* s)
 {
     version (MARS)
@@ -77,16 +81,16 @@ private bool symbol_iscomdat4(Symbol* s)
 enum CV8_MAX_SYMBOL_LENGTH = 0xffd8;
 
 // The "F1" section, which is the symbols
-private __gshared Outbuffer *F1_buf;
+private __gshared OutBuffer *F1_buf;
 
 // The "F2" section, which is the line numbers
-private __gshared Outbuffer *F2_buf;
+private __gshared OutBuffer *F2_buf;
 
 // The "F3" section, which is global and a string table of source file names.
-private __gshared Outbuffer *F3_buf;
+private __gshared OutBuffer *F3_buf;
 
 // The "F4" section, which is global and a lists info about source files.
-private __gshared Outbuffer *F4_buf;
+private __gshared OutBuffer *F4_buf;
 
 /* Fixups that go into F1 section
  */
@@ -97,7 +101,7 @@ struct F1_Fixups
     uint value;
 }
 
-private __gshared Outbuffer *F1fixup;      // array of F1_Fixups
+private __gshared OutBuffer *F1fixup;      // array of F1_Fixups
 
 /* Struct in which to collect per-function data, for later emission
  * into .debug$S.
@@ -111,17 +115,18 @@ struct FuncData
     uint linepairstart;     // starting byte index of offset/line pairs in linebuf[]
     uint linepairbytes;     // number of bytes for offset/line pairs
     uint linepairsegment;   // starting byte index of filename segment for offset/line pairs
-    Outbuffer *f1buf;
-    Outbuffer *f1fixup;
+    OutBuffer *f1buf;
+    OutBuffer *f1fixup;
 }
 
 __gshared FuncData currentfuncdata;
 
-private __gshared Outbuffer *funcdata;     // array of FuncData's
+private __gshared OutBuffer *funcdata;     // array of FuncData's
 
-private __gshared Outbuffer *linepair;     // array of offset/line pairs
+private __gshared OutBuffer *linepair;     // array of offset/line pairs
 
-void cv8_writename(Outbuffer *buf, const(char)* name, size_t len)
+private @trusted
+void cv8_writename(OutBuffer *buf, const(char)* name, size_t len)
 {
     if(config.flags2 & CFG2gms)
     {
@@ -154,6 +159,7 @@ void cv8_writename(Outbuffer *buf, const(char)* name, size_t len)
  * Input:
  *      filename        source file name
  */
+@trusted
 void cv8_initfile(const(char)* filename)
 {
     //printf("cv8_initfile()\n");
@@ -162,7 +168,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!F1_buf)
     {
-        __gshared Outbuffer f1buf;
+        __gshared OutBuffer f1buf;
         f1buf.reserve(1024);
         F1_buf = &f1buf;
     }
@@ -170,7 +176,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!F1fixup)
     {
-        __gshared Outbuffer f1fixupbuf;
+        __gshared OutBuffer f1fixupbuf;
         f1fixupbuf.reserve(1024);
         F1fixup = &f1fixupbuf;
     }
@@ -178,7 +184,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!F2_buf)
     {
-        __gshared Outbuffer f2buf;
+        __gshared OutBuffer f2buf;
         f2buf.reserve(1024);
         F2_buf = &f2buf;
     }
@@ -186,7 +192,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!F3_buf)
     {
-        __gshared Outbuffer f3buf;
+        __gshared OutBuffer f3buf;
         f3buf.reserve(1024);
         F3_buf = &f3buf;
     }
@@ -195,7 +201,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!F4_buf)
     {
-        __gshared Outbuffer f4buf;
+        __gshared OutBuffer f4buf;
         f4buf.reserve(1024);
         F4_buf = &f4buf;
     }
@@ -203,7 +209,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!funcdata)
     {
-        __gshared Outbuffer funcdatabuf;
+        __gshared OutBuffer funcdatabuf;
         funcdatabuf.reserve(1024);
         funcdata = &funcdatabuf;
     }
@@ -211,7 +217,7 @@ void cv8_initfile(const(char)* filename)
 
     if (!linepair)
     {
-        __gshared Outbuffer linepairbuf;
+        __gshared OutBuffer linepairbuf;
         linepairbuf.reserve(1024);
         linepair = &linepairbuf;
     }
@@ -224,6 +230,7 @@ void cv8_initfile(const(char)* filename)
     cv_init();
 }
 
+@trusted
 void cv8_termfile(const(char)* objfilename)
 {
     //printf("cv8_termfile()\n");
@@ -238,7 +245,7 @@ void cv8_termfile(const(char)* objfilename)
 
     /* Start with starting symbol in separate "F1" section
      */
-    Outbuffer buf = Outbuffer(1024);
+    auto buf = OutBuffer(1024);
     size_t len = strlen(objfilename);
     buf.write16(cast(int)(2 + 4 + len + 1));
     buf.write16(S_COMPILAND_V3);
@@ -336,6 +343,7 @@ void cv8_initmodule(const(char)* filename, const(char)* modulename)
     //printf("cv8_initmodule(filename = %s, modulename = %s)\n", filename, modulename);
 }
 
+@trusted
 void cv8_termmodule()
 {
     //printf("cv8_termmodule()\n");
@@ -345,6 +353,7 @@ void cv8_termmodule()
 /******************************************
  * Called at the start of a function.
  */
+@trusted
 void cv8_func_start(Symbol *sfunc)
 {
     //printf("cv8_func_start(%s)\n", sfunc.Sident);
@@ -358,15 +367,16 @@ void cv8_func_start(Symbol *sfunc)
     if (symbol_iscomdat4(sfunc))
     {
         // This leaks memory
-        currentfuncdata.f1buf = cast(Outbuffer*)mem_calloc(Outbuffer.sizeof);
+        currentfuncdata.f1buf = cast(OutBuffer*)mem_calloc(OutBuffer.sizeof);
         currentfuncdata.f1buf.reserve(128);
-        currentfuncdata.f1fixup = cast(Outbuffer*)mem_calloc(Outbuffer.sizeof);
+        currentfuncdata.f1fixup = cast(OutBuffer*)mem_calloc(OutBuffer.sizeof);
         currentfuncdata.f1fixup.reserve(128);
     }
 
     varStats_startFunction();
 }
 
+@trusted
 void cv8_func_term(Symbol *sfunc)
 {
     //printf("cv8_func_term(%s)\n", sfunc.Sident);
@@ -429,7 +439,7 @@ void cv8_func_term(Symbol *sfunc)
      *  1       flags
      *  n       0 terminated name string
      */
-    Outbuffer *buf = currentfuncdata.f1buf;
+    auto buf = currentfuncdata.f1buf;
     buf.reserve(cast(uint)(2 + 2 + 4 * 7 + 6 + 1 + len + 1));
     buf.write16n(cast(int)(2 + 4 * 7 + 6 + 1 + len + 1));
     buf.write16n(sfunc.Sclass == SCstatic ? S_LPROC_V3 : S_GPROC_V3);
@@ -471,13 +481,13 @@ void cv8_func_term(Symbol *sfunc)
 
         extern (C++) static void endArgs()
         {
-            Outbuffer *buf = currentfuncdata.f1buf;
+            auto buf = currentfuncdata.f1buf;
             buf.write16(2);
             buf.write16(S_ENDARG);
         }
         extern (C++) static void beginBlock(int offset, int length)
         {
-            Outbuffer *buf = currentfuncdata.f1buf;
+            auto buf = currentfuncdata.f1buf;
             uint soffset = cast(uint)buf.length();
             // parent and end to be filled by linker
             block_v3_data block32 = { block_v3_data.sizeof - 2, S_BLOCK_V3, 0, 0, length, offset, 0, [ 0 ] };
@@ -492,7 +502,7 @@ void cv8_func_term(Symbol *sfunc)
         }
         extern (C++) static void endBlock()
         {
-            Outbuffer *buf = currentfuncdata.f1buf;
+            auto buf = currentfuncdata.f1buf;
             buf.write16(2);
             buf.write16(S_END);
         }
@@ -514,6 +524,7 @@ void cv8_func_term(Symbol *sfunc)
 /**********************************************
  */
 
+@trusted
 void cv8_linnum(Srcpos srcpos, uint offset)
 {
     version (MARS)
@@ -566,6 +577,7 @@ void cv8_linnum(Srcpos srcpos, uint offset)
  * Return offset into F4.
  */
 
+@trusted
 uint cv8_addfile(const(char)* filename)
 {
     //printf("cv8_addfile('%s')\n", filename);
@@ -658,7 +670,8 @@ L1:
     return length;
 }
 
-void cv8_writesection(int seg, uint type, Outbuffer *buf)
+private @trusted
+void cv8_writesection(int seg, uint type, OutBuffer *buf)
 {
     /* Write out as:
      *  bytes   desc
@@ -678,6 +691,7 @@ void cv8_writesection(int seg, uint type, Outbuffer *buf)
     objmod.lidata(seg,off+8+length,pad);
 }
 
+@trusted
 void cv8_outsym(Symbol *s)
 {
     //printf("cv8_outsym(s = '%s')\n", s.Sident);
@@ -699,7 +713,7 @@ void cv8_outsym(Symbol *s)
 
     F1_Fixups f1f;
     f1f.value = 0;
-    Outbuffer *buf = currentfuncdata.f1buf;
+    auto buf = currentfuncdata.f1buf;
 
     uint sr;
     uint base;
@@ -829,10 +843,11 @@ else
  *      id      the name
  *      typidx  and its type
  */
+@trusted
 void cv8_udt(const(char)* id, idx_t typidx)
 {
     //printf("cv8_udt('%s', %x)\n", id, typidx);
-    Outbuffer *buf = currentfuncdata.f1buf;
+    auto buf = currentfuncdata.f1buf;
     size_t len = strlen(id);
 
     if (len > CV8_MAX_SYMBOL_LENGTH)
@@ -894,6 +909,7 @@ int cv8_regnum(Symbol *s)
  * Put out a forward ref for structs, unions, and classes.
  * Only put out the real definitions with toDebug().
  */
+@trusted
 idx_t cv8_fwdref(Symbol *s)
 {
     assert(config.fulltypes == CV8);
@@ -948,6 +964,7 @@ idx_t cv8_fwdref(Symbol *s)
  *      t       darray type
  *      etypidx type index for E
  */
+@trusted
 idx_t cv8_darray(type *t, idx_t etypidx)
 {
     //printf("cv8_darray(etypidx = %x)\n", etypidx);
@@ -1048,6 +1065,7 @@ static if (0)
  *      t          delegate type
  *      functypidx type index for pointer to function
  */
+@trusted
 idx_t cv8_ddelegate(type *t, idx_t functypidx)
 {
     //printf("cv8_ddelegate(functypidx = %x)\n", functypidx);
@@ -1129,6 +1147,7 @@ else
  *      keyidx     key type
  *      validx     value type
  */
+@trusted
 idx_t cv8_daarray(type *t, idx_t keyidx, idx_t validx)
 {
     //printf("cv8_daarray(keyidx = %x, validx = %x)\n", keyidx, validx);

@@ -5,7 +5,7 @@
  * However, this file will be used to generate the
  * $(LINK2 https://dlang.org/dmd-linux.html, online documentation) and MAN pages.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/cli.d, _cli.d)
@@ -33,8 +33,8 @@ enum TargetOS : ubyte
     DragonFlyBSD = 0x40,
 
     // Combination masks
-    all = linux | Windows | OSX | FreeBSD | Solaris | DragonFlyBSD,
-    Posix = linux | OSX | FreeBSD | Solaris | DragonFlyBSD,
+    all = linux | Windows | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
+    Posix = linux | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
 }
 
 // Detect the current TargetOS
@@ -49,6 +49,10 @@ else version(Windows)
 else version(OSX)
 {
     private enum targetOS = TargetOS.OSX;
+}
+else version(OpenBSD)
+{
+    private enum targetOS = TargetOS.OpenBSD;
 }
 else version(FreeBSD)
 {
@@ -345,6 +349,10 @@ dmd -cov -unittest myprog.d
             "generate position independent code",
             cast(TargetOS) (TargetOS.all & ~(TargetOS.Windows | TargetOS.OSX))
         ),
+        Option("fPIE",
+            "generate position independent executables",
+            cast(TargetOS) (TargetOS.all & ~(TargetOS.Windows | TargetOS.OSX))
+        ),
         Option("g",
             "add symbolic debug info",
             `$(WINDOWS
@@ -352,10 +360,15 @@ dmd -cov -unittest myprog.d
                 $(LINK2 http://dlang.org/windbg.html, Debugging on Windows).
             )
             $(UNIX
-                Add symbolic debug info in Dwarf format
+                Add symbolic debug info in DWARF format
                 for debuggers such as
                 $(D gdb)
             )`,
+        ),
+        Option("gdwarf=<version>",
+            "add DWARF symbolic debug info",
+            "The value of version may be 3, 4 or 5, defaulting to 3.",
+            cast(TargetOS) (TargetOS.all & ~cast(uint)TargetOS.Windows)
         ),
         Option("gf",
             "emit debug info for all referenced types",
@@ -493,16 +506,19 @@ dmd -cov -unittest myprog.d
             or later compiler.`,
         ),
         Option("main",
-            "add default main() (e.g. for unittesting)",
+            "add default main() if not present already (e.g. for unittesting)",
             `Add a default $(D main()) function when compiling. This is useful when
             unittesting a library, as it enables running the unittests
             in a library without having to manually define an entry-point function.`,
         ),
-        Option("makedeps",
-            "print module dependencies in Makefile compatible format to stdout"
-        ),
-        Option("makedeps=<filename>",
-            "write module dependencies in Makefile compatible format to filename (only imports)"
+        Option("makedeps[=<filename>]",
+            "print dependencies in Makefile compatible format to filename or stdout.",
+            `Print dependencies in Makefile compatible format.
+            If filename is omitted, it prints to stdout.
+            The emitted targets are the compiled artifacts (executable, object files, libraries).
+            The emitted dependencies are imported modules and imported string files (via $(B -J) switch).
+            Special characters in a dependency or target filename are escaped in the GNU Make manner.
+            `,
         ),
         Option("man",
             "open web browser on manual page",
@@ -655,6 +671,23 @@ dmd -cov -unittest myprog.d
             `$(UNIX Generate shared library)
              $(WINDOWS Generate DLL library)`,
         ),
+        Option("target=<triple>",
+               "use <triple> as <arch>-[<vendor>-]<os>[-<cenv>[-<cppenv]]",
+               "$(I arch) is the architecture: either `x86`, `x64`, `x86_64` or `x32`,
+               $(I vendor) is always ignored, but supported for easier interoperability,
+               $(I os) is the operating system, this may have a trailing version number:
+               `freestanding` for no operating system,
+               `darwin` or `osx` for MacOS, `dragonfly` or `dragonflybsd` for DragonflyBSD,
+               `freebsd`, `openbsd`, `linux`, `solaris` or `windows` for their respective operating systems.
+               $(I cenv) is the C runtime environment and is optional: `musl` for musl-libc,
+               `msvc` for the MSVC runtime (the default for windows with this option),
+               `bionic` for the Andriod libc, `digital_mars` for the Digital Mars runtime for Windows
+               `gnu` or `glibc` for the GCC C runtime, `newlib` or `uclibc` for their respective C runtimes.
+               ($ I cppenv) is the C++ runtime environment: `clang` for the LLVM C++ runtime
+               `gcc` for GCC's C++ runtime, `msvc` for microsoft's MSVC C++ runtime (the default for windows with this switch),
+               `sun` for Sun's C++ runtime and `digital_mars` for the Digital Mars C++ runtime for windows.
+               "
+        ),
         Option("transition=<name>",
             "help with language change identified by 'name'",
             `Show additional info about language change identified by $(I id)`,
@@ -754,24 +787,28 @@ dmd -cov -unittest myprog.d
         Feature("field", "vfield",
             "list all non-mutable fields which occupy an object instance"),
         Feature("complex", "vcomplex",
-            "give deprecation messages about all usages of complex or imaginary types"),
+            "give deprecation messages about all usages of complex or imaginary types", false, true),
         Feature("tls", "vtls",
             "list all variables going into thread local storage"),
         Feature("vmarkdown", "vmarkdown",
             "list instances of Markdown replacements in Ddoc"),
+        Feature("in", "vin",
+            "list all usages of 'in' on parameter"),
     ];
 
     /// Returns all available reverts
     static immutable reverts = [
-        Feature("dip25", "noDIP25", "revert DIP25 changes https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md"),
+        Feature("dip25", "useDIP25", "revert DIP25 changes https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md"),
+        Feature("intpromote", "fix16997", "revert integral promotions for unary + - ~ operators"),
         Feature("markdown", "markdown", "disable Markdown replacements in Ddoc"),
+        Feature("dtorfields", "dtorFields", "don't destruct fields of partially constructed objects"),
     ];
 
     /// Returns all available previews
     static immutable previews = [
         Feature("dip25", "useDIP25",
             "implement https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md (Sealed references)"),
-        Feature("dip1000", "vsafe",
+        Feature("dip1000", "useDIP1000",
             "implement https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1000.md (Scoped Pointers)"),
         Feature("dip1008", "ehnogc",
             "implement https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1008.md (@nogc Throwable)"),
@@ -781,9 +818,9 @@ dmd -cov -unittest myprog.d
         Feature("fixAliasThis", "fixAliasThis",
             "when a symbol is resolved, check alias this scope before going to upper scopes"),
         Feature("intpromote", "fix16997",
-            "fix integral promotions for unary + - ~ operators"),
+            "fix integral promotions for unary + - ~ operators", false, true),
         Feature("dtorfields", "dtorFields",
-            "destruct fields of partially constructed objects"),
+            "destruct fields of partially constructed objects", false, false),
         Feature("rvaluerefparam", "rvalueRefParam",
             "enable rvalue arguments to ref parameters"),
         Feature("nosharedaccess", "noSharedAccess",
@@ -925,4 +962,13 @@ struct CLIUsage
   =silent               Silently ignore non-exern(C[++]) declarations
   =verbose              Add a comment for ignored non-exern(C[++]) declarations
 ";
+
+    /// Options supported by -gdwarf
+    enum gdwarfUsage = "Available DWARF versions:
+  =[h|help|?]           List information on choices
+  =3                    Emit DWARF version 3 debug information
+  =4                    Emit DWARF version 4 debug information
+  =5                    Emit DWARF version 5 debug information
+";
+
 }

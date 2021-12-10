@@ -1,6 +1,6 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
  * http://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -22,6 +22,7 @@ struct Scope;
 class DsymbolTable;
 class Declaration;
 class ThisDeclaration;
+class BitFieldDeclaration;
 class TypeInfoDeclaration;
 class TupleDeclaration;
 class AliasDeclaration;
@@ -103,13 +104,25 @@ struct Visibility
     };
     Kind kind;
     Package *pkg;
-
-    bool isSubsetOf(const Visibility& other) const;
 };
 
 /* State of symbol in winding its way through the passes of the compiler
  */
-enum PASS
+enum class PASS : uint8_t
+{
+    init,           // initial state
+    semantic,       // semantic() started
+    semanticdone,   // semantic() done
+    semantic2,      // semantic2() started
+    semantic2done,  // semantic2() done
+    semantic3,      // semantic3() started
+    semantic3done,  // semantic3() done
+    inline_,         // inline started
+    inlinedone,     // inline done
+    obj             // toObjFile() run
+};
+
+enum
 {
     PASSinit,           // initial state
     PASSsemantic,       // semantic() started
@@ -137,7 +150,20 @@ enum
                                     // meaning don't search imports in that scope,
                                     // because qualified module searches search
                                     // their imports
-    IgnoreSymbolVisibility  = 0x80  // also find private and package protected symbols
+    IgnoreSymbolVisibility  = 0x80,  // also find private and package protected symbols
+    TagNameSpace            = 0x100, // search ImportC tag symbol table
+};
+
+struct FieldState
+{
+    unsigned offset;
+
+    unsigned fieldOffset;
+    unsigned fieldSize;
+    unsigned fieldAlign;
+    unsigned bitOffset;
+
+    bool inFlight;
 };
 
 class Dsymbol : public ASTNode
@@ -155,6 +181,7 @@ public:
     const utf8_t *prettystring;
     bool errors;                // this symbol failed to pass semantic()
     PASS semanticRun;
+    unsigned short localNum;        // perturb mangled name to avoid collisions with those in FuncDeclaration.localsymtab
     DeprecatedDeclaration *depdecl; // customized deprecation message
     UserAttributeDeclaration *userAttribDecl;   // user defined attributes
     UnitTestDeclaration *ddocUnittest; // !=NULL means there's a ddoc unittest associated with this symbol (only use this with ddoc)
@@ -215,7 +242,7 @@ public:
     virtual Visibility visible();
     virtual Dsymbol *syntaxCopy(Dsymbol *s);    // copy only syntax trees
     virtual bool oneMember(Dsymbol **ps, Identifier *ident);
-    virtual void setFieldOffset(AggregateDeclaration *ad, unsigned *poffset, bool isunion);
+    virtual void setFieldOffset(AggregateDeclaration *ad, FieldState& fieldState, bool isunion);
     virtual bool hasPointers();
     virtual bool hasStaticCtorOrDtor();
     virtual void addLocalClass(ClassDeclarations *) { }
@@ -240,6 +267,7 @@ public:
     virtual ExpressionDsymbol *isExpressionDsymbol() { return NULL; }
     virtual AliasAssign *isAliasAssign() { return NULL; }
     virtual ThisDeclaration *isThisDeclaration() { return NULL; }
+    virtual BitFieldDeclaration *isBitFieldDeclaration() { return NULL; }
     virtual TypeInfoDeclaration *isTypeInfoDeclaration() { return NULL; }
     virtual TupleDeclaration *isTupleDeclaration() { return NULL; }
     virtual AliasDeclaration *isAliasDeclaration() { return NULL; }
@@ -388,7 +416,7 @@ public:
     Dsymbol *lookup(Identifier const * const ident);
 
     // Look for Dsymbol in table. If there, return it. If not, insert s and return that.
-    Dsymbol *update(Dsymbol *s);
+    void update(Dsymbol *s);
 
     // Insert Dsymbol in table. Return NULL if already there.
     Dsymbol *insert(Dsymbol *s);

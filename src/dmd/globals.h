@@ -1,6 +1,6 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
  * http://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -12,32 +12,12 @@
 
 #include "root/dcompat.h"
 #include "root/ctfloat.h"
-#include "root/outbuffer.h"
+#include "common/outbuffer.h"
 #include "root/filename.h"
 #include "compiler.h"
 
 // Can't include arraytypes.h here, need to declare these directly.
 template <typename TYPE> struct Array;
-
-typedef unsigned char TargetOS;
-enum
-{
-    /* These are mutually exclusive; one and only one is set.
-     * Match spelling and casing of corresponding version identifiers
-     */
-    TargetOS_linux        = 1,
-    TargetOS_Windows      = 2,
-    TargetOS_OSX          = 4,
-    TargetOS_OpenBSD      = 8,
-    TargetOS_FreeBSD      = 0x10,
-    TargetOS_Solaris      = 0x20,
-    TargetOS_DragonFlyBSD = 0x40,
-
-    // Combination masks
-    all = TargetOS_linux | TargetOS_Windows | TargetOS_OSX | TargetOS_FreeBSD | TargetOS_Solaris | TargetOS_DragonFlyBSD,
-    Posix = TargetOS_linux | TargetOS_OSX | TargetOS_FreeBSD | TargetOS_Solaris | TargetOS_DragonFlyBSD,
-};
-
 
 typedef unsigned char Diagnostic;
 enum
@@ -73,25 +53,6 @@ enum
     CHECKACTION_context   // call D assert with the error context on failure
 };
 
-enum class CPU
-{
-    x87,
-    mmx,
-    sse,
-    sse2,
-    sse3,
-    ssse3,
-    sse4_1,
-    sse4_2,
-    avx,                // AVX1 instruction set
-    avx2,               // AVX2 instruction set
-    avx512,             // AVX-512 instruction set
-
-    // Special values that don't survive past the command line processing
-    baseline,           // (default) the minimum capability CPU
-    native              // the machine the compiler is being run on
-};
-
 enum JsonFieldFlags
 {
     none         = 0,
@@ -118,6 +79,14 @@ enum class CxxHeaderMode
     verbose /// Generate headers and add comments for hidden declarations
 };
 
+/// Trivalent boolean to represent the state of a `revert`able change
+enum class FeatureState : signed char
+{
+    default_ = -1, /// Not specified by the user
+    disabled = 0,  /// Specified as `-revert=`
+    enabled = 1    /// Specified as `-preview=`
+};
+
 // Put command line switches in here
 struct Param
 {
@@ -138,22 +107,16 @@ struct Param
     bool vgc;           // identify gc usage
     bool vfield;        // identify non-mutable field variables
     bool vcomplex;      // identify complex/imaginary type usage
+    bool vin;           // identify 'in' parameters
     unsigned char symdebug;  // insert debug symbolic information
     bool symdebugref;   // insert debug information for all referenced types, too
-    bool alwaysframe;   // always emit standard stack frame
     bool optimize;      // run optimizer
-    bool map;           // generate linker .map file
-    bool is64bit;       // generate 64 bit code
-    bool isLP64;        // generate code for LP64
-    TargetOS targetOS;      // operating system to generate code for
-    bool hasObjectiveC; // target supports Objective-C
-    bool mscoff;        // for Win32: write COFF object files instead of OMF
     Diagnostic useDeprecated;
     bool stackstomp;    // add stack stomping code
     bool useUnitTests;  // generate unittest code
     bool useInline;     // inline expand functions
-    bool useDIP25;      // implement http://wiki.dlang.org/DIP25
-    bool noDIP25;       // revert to pre-DIP25 behavior
+    FeatureState useDIP25;      // implement http://wiki.dlang.org/DIP25
+    FeatureState useDIP1000; // implement https://dlang.org/spec/memory-safe-d.html#scope-return-params
     bool useDIP1021;    // implement https://github.com/dlang/DIPs/blob/master/DIPs/accepted/DIP1021.md
     bool release;       // build release version
     bool preservePaths; // true means don't strip path from source file
@@ -178,10 +141,9 @@ struct Param
                         // https://issues.dlang.org/show_bug.cgi?id=16997
     bool fixAliasThis;  // if the current scope has an alias this, check it before searching upper scopes
     bool inclusiveInContracts;   // 'in' contracts of overridden methods must be a superset of parent contract
-    bool vsafe;         // use enhanced @safe checking
     bool ehnogc;        // use @nogc exception handling
-    bool dtorFields;        // destruct fields of partially constructed objects
-                            // https://issues.dlang.org/show_bug.cgi?id=14246
+    FeatureState dtorFields;  // destruct fields of partially constructed objects
+                              // https://issues.dlang.org/show_bug.cgi?id=14246
     bool fieldwise;         // do struct equality testing field-wise rather than by memcmp()
     bool rvalueRefParam;    // allow rvalues to be arguments to ref parameters
     CppStdRevision cplusplus;  // version of C++ name mangling to support
@@ -200,8 +162,6 @@ struct Param
     bool externStdUsage;    // print help on -extern-std switch
     bool hcUsage;           // print help on -HC switch
     bool logo;              // print logo;
-
-    CPU cpu;                // CPU instruction set to target
 
     CHECKENABLE useInvariants;     // generate class invariant checks
     CHECKENABLE useIn;             // generate precondition checks
@@ -258,18 +218,11 @@ struct Param
     DString moduleDepsFile;     // filename for deps output
     OutBuffer *moduleDeps;      // contents to be written to deps file
 
-    DString makeDepsFile;       // filename for makedeps output
-    OutBuffer *makeDeps;        // contents to be written to makedeps file
+    bool emitMakeDeps;                // whether to emit makedeps
+    DString makeDepsFile;             // filename for makedeps output
+    Array<const char *> makeDeps;     // dependencies for makedeps
 
     MessageStyle messageStyle;  // style of file/line annotations on messages
-
-    // Hidden debug switches
-    bool debugb;
-    bool debugc;
-    bool debugf;
-    bool debugr;
-    bool debugx;
-    bool debugy;
 
     bool run;           // run resulting executable
     Strings runargs;    // arguments for executable
@@ -286,26 +239,36 @@ struct Param
     DString mapfile;
 };
 
-typedef unsigned structalign_t;
+struct structalign_t
+{
+    unsigned short value;
+    bool pack;
+
+    bool isDefault() const;
+    void setDefault();
+    bool isUnknown() const;
+    void setUnknown();
+    void set(unsigned value);
+    unsigned get() const;
+    bool isPack() const;
+    void setPack(bool pack);
+};
+
 // magic value means "match whatever the underlying C compiler does"
 // other values are all powers of 2
-#define STRUCTALIGN_DEFAULT ((structalign_t) ~0)
+//#define STRUCTALIGN_DEFAULT ((structalign_t) ~0)
+
+const DString mars_ext = "d";
+const DString doc_ext  = "html";     // for Ddoc generated files
+const DString ddoc_ext = "ddoc";     // for Ddoc macro include files
+const DString dd_ext   = "dd";       // for Ddoc source files
+const DString hdr_ext  = "di";       // for D 'header' import files
+const DString json_ext = "json";     // for JSON files
+const DString map_ext  = "map";      // for .map files
 
 struct Global
 {
     DString inifilename;
-    const DString mars_ext;
-    DString obj_ext;
-    DString lib_ext;
-    DString dll_ext;
-    const DString doc_ext;      // for Ddoc generated files
-    const DString ddoc_ext;     // for Ddoc macro include files
-    const DString hdr_ext;      // for D 'header' import files
-    const DString cxxhdr_ext;   // for C/C++ 'header' files
-    const DString json_ext;     // for JSON files
-    const DString map_ext;      // for .map files
-    bool run_noext;             // allow -run sources without extensions.
-
 
     const DString copyright;
     const DString written;
@@ -325,6 +288,8 @@ struct Global
 
     Array<class Identifier*>* versionids; // command line versions and predefined versions
     Array<class Identifier*>* debugids;   // command line debug versions and predefined versions
+
+    bool hasMainFunction;
 
     /* Start gagging. Return the current number of gagged errors
      */
@@ -434,12 +399,12 @@ enum class CPPMANGLE : uint8_t
     asClass
 };
 
-enum MATCH
+enum class MATCH : int
 {
-    MATCHnomatch,       // no match
-    MATCHconvert,       // match with conversions
-    MATCHconst,         // match with conversion to const
-    MATCHexact          // exact match
+    nomatch,       // no match
+    convert,       // match with conversions
+    constant,      // match with conversion to const
+    exact          // exact match
 };
 
 enum class PINLINE : uint8_t

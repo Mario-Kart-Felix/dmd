@@ -1,9 +1,11 @@
 /**
+ * Common definitions
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cc.d, backend/_cc.d)
@@ -25,6 +27,7 @@ import dmd.backend.type;
 extern (C++):
 @nogc:
 nothrow:
+@safe:
 
 enum GENOBJ = 1;       // generating .obj file
 
@@ -76,15 +79,6 @@ else
 {
     bool LARGEDATA() { return (config.memmodel & 6) != 0; }
     bool LARGECODE() { return (config.memmodel & 5) != 0; }
-}
-
-// Language for error messages
-enum LANG
-{
-    LANGenglish,
-    LANGgerman,
-    LANGfrench,
-    LANGjapanese,
 }
 
 version (SPP)
@@ -156,7 +150,6 @@ else
 //struct block;
 //struct Classsym;
 //struct Nspacesym;
-//struct Outbuffer;
 //struct Aliassym;
 //struct dt_t;
 //typedef struct TYPE type;
@@ -176,6 +169,7 @@ alias enum_TK = ubyte;
 
 __gshared Config config;
 
+@trusted
 uint CPP() { return config.flags3 & CFG3cpp; }
 
 
@@ -185,7 +179,7 @@ struct Srcpos
 {
 nothrow:
     uint Slinnum;           // 0 means no info available
-    uint Scharnum;
+    uint Scharnum;          // 0 means no info available
     version (SCPP)
     {
         Sfile **Sfilptr;            // file
@@ -208,7 +202,7 @@ nothrow:
 
         const(char*) name() const { return Sfilename; }
 
-        static Srcpos create(const(char)* filename, uint linnum, int charnum)
+        static Srcpos create(const(char)* filename, uint linnum, uint charnum)
         {
             // Cannot have constructor because Srcpos is used in a union
             Srcpos sp;
@@ -371,10 +365,16 @@ struct Pstate
                                 // than STmaxsequence
 }
 
+@trusted
 void funcsym_p(Funcsym* fp) { pstate.STfuncsym_p = fp; }
+
+@trusted
 Funcsym* funcsym_p() { return pstate.STfuncsym_p; }
 
+@trusted
 stflags_t preprocessor() { return pstate.STflags & PFLpreprocessor; }
+
+@trusted
 stflags_t inline_asm()   { return pstate.STflags & (PFLmasm | PFLbasm); }
 
 extern __gshared Pstate pstate;
@@ -616,13 +616,23 @@ nothrow:
         }
     }
 
+    @trusted
     void appendSucc(block* b)        { list_append(&this.Bsucc, b); }
+
+    @trusted
     void prependSucc(block* b)       { list_prepend(&this.Bsucc, b); }
+
+    @trusted
     int numSucc()                    { return list_nitems(this.Bsucc); }
+
+    @trusted
     block* nthSucc(int n)            { return cast(block*)list_ptr(list_nth(Bsucc, n)); }
+
+    @trusted
     void setNthSucc(int n, block *b) { list_nth(Bsucc, n).ptr = b; }
 }
 
+@trusted
 inout(block)* list_block(inout list_t lst) { return cast(inout(block)*)list_ptr(lst); }
 
 /** Basic block control flow operators. **/
@@ -739,7 +749,7 @@ enum
     Fjmonitor        = 0x100,   // Mars synchronized function
     Fnosideeff       = 0x200,   // function has no side effects
     F3badoparrow     = 0x400,   // bad operator->()
-    Fmain            = 0x800,   // function is main() or wmain()
+    Fmain            = 0x800,   // function is D main
     Fnested          = 0x1000,  // D nested function with 'this'
     Fmember          = 0x2000,  // D member function with 'this'
     Fnotailrecursion = 0x4000,  // no tail recursion optimizations
@@ -896,6 +906,7 @@ struct mptr_t
     mptr_flags_t   MPflags;
 }
 
+@trusted
 inout(mptr_t)* list_mptr(inout(list_t) lst) { return cast(inout(mptr_t)*) list_ptr(lst); }
 
 
@@ -1157,8 +1168,13 @@ struct struct_t
  * Symbol Table
  */
 
+@trusted
 inout(Symbol)* list_symbol(inout list_t lst) { return cast(inout(Symbol)*) list_ptr(lst); }
+
+@trusted
 void list_setsymbol(list_t lst, Symbol* s) { lst.ptr = s; }
+
+@trusted
 inout(Classsym)* list_Classsym(inout list_t lst) { return cast(inout(Classsym)*) list_ptr(lst); }
 
 enum
@@ -1419,7 +1435,7 @@ struct Symbol
     }
     regm_t      Sregsaved;      // mask of registers not affected by this func
 
-    uint lnoscopestart;         // life time of var
+    Srcpos lposscopestart;        // life time of var
     uint lnoscopeend;           // the line after the scope
 
     /**
@@ -1531,6 +1547,7 @@ enum
  * Returns:
  *      exception method for f
  */
+@trusted
 EHmethod ehmethod(Symbol *f)
 {
     return f.Sfunc.Fflags3 & Feh_none ? EHmethod.EH_NONE : config.ehmethod;

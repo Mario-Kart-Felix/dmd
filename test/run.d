@@ -27,30 +27,23 @@ shared string unitTestRunnerCommand;
 // These long-running runnable tests will be put in front, in this order, to
 // make parallelization more effective.
 immutable slowRunnableTests = [
-    "test17338.d",
-    "testthread2.d",
-    "sctor.d",
-    "sctor2.d",
-    "sdtor.d",
-    "test9259.d",
-    "test11447c.d",
-    "template4.d",
-    "template9.d",
-    "ifti.d",
-    "test12.d",
-    "test22.d",
-    "test23.d",
-    "test28.d",
     "test34.d",
+    "test28.d",
+    "issue8671.d",
+    "test20855.d",
+    "test18545.d",
     "test42.d",
-    "test17072.d",
-    "testgc3.d",
-    "link2644.d",
-    "link13415.d",
-    "link14558.d",
-    "hospital.d",
-    "interpret.d",
+    "lazy.d",
+    "xtest46_gc.d",
+    "argufilem.d",
     "xtest46.d",
+    "sdtor.d",
+    "arrayop.d",
+    "testgc3.d",
+    "link14588.d",
+    "link13415.d",
+    "paranoia.d",
+    "template9.d",
 ];
 
 enum toolsDir = testPath("tools");
@@ -88,10 +81,10 @@ int main(string[] args)
 int tryMain(string[] args)
 {
     bool runUnitTests, dumpEnvironment;
-    int jobs = totalCPUs;
+    int jobs = 2 * totalCPUs;
     auto res = getopt(args,
         std.getopt.config.passThrough,
-        "j|jobs", "Specifies the number of jobs (commands) to run simultaneously (default: %d)".format(totalCPUs), &jobs,
+        "j|jobs", "Specifies the number of jobs (commands) to run simultaneously (default: %d)".format(jobs), &jobs,
         "v", "Verbose command output", (cast(bool*) &verbose),
         "f", "Force run (ignore timestamps and always run all tests)", (cast(bool*) &force),
         "u|unit-tests", "Runs the unit tests", &runUnitTests,
@@ -134,7 +127,16 @@ Options:
     unitTestRunnerCommand = resultsDir.buildPath("unit_test_runner").exeName;
 
     // bootstrap all needed environment variables
-    auto env = getEnvironment;
+    const env = getEnvironment();
+
+    // Dump environnment
+    if (verbose || dumpEnvironment)
+    {
+        writefln("================================================================================");
+        foreach (key, value; env)
+            writefln("%s=%s", key, value);
+        writefln("================================================================================");
+    }
 
     if (runUnitTests)
     {
@@ -184,14 +186,6 @@ Options:
     {
         verifyCompilerExists(env);
 
-        if (verbose || dumpEnvironment)
-        {
-            writefln("================================================================================");
-            foreach (key, value; env)
-                writefln("%s=%s", key, value);
-            writefln("================================================================================");
-        }
-
         string[] failedTargets;
         ensureToolsExists(env, EnumMembers!TestTools);
         foreach (target; parallel(targets, 1))
@@ -200,7 +194,10 @@ Options:
             int status = spawnProcess(target.args, env, Config.none, scriptDir).wait;
             if (status != 0)
             {
-                const name = target.normalizedTestName;
+                const string name = target.filename
+                            ? target.normalizedTestName
+                            : "`unit` tests";
+
                 writeln(">>> TARGET FAILED: ", name);
                 failedTargets ~= name;
             }
@@ -218,7 +215,7 @@ Options:
 }
 
 /// Verify that the compiler has been built.
-void verifyCompilerExists(string[string] env)
+void verifyCompilerExists(const string[string] env)
 {
     if (!env["DMD"].exists)
     {
@@ -231,9 +228,34 @@ void verifyCompilerExists(string[string] env)
 Builds the binary of the tools required by the testsuite.
 Does nothing if the tools already exist and are newer than their source.
 */
-void ensureToolsExists(string[string] env, const TestTool[] tools ...)
+void ensureToolsExists(const string[string] env, const TestTool[] tools ...)
 {
     resultsDir.mkdirRecurse;
+
+    version (Windows)
+    {{
+        // Environment variables are not properly propagated when using bash from WSL
+        // Create an additional configuration file that exports `env` entries if missing
+
+        File wrapper = File(env["RESULTS_DIR"] ~ "/setup_env.sh", "wb");
+
+        foreach (const key, string value; env)
+        {
+            // Detect windows paths and translate them to POSIX compatible relative paths
+            static immutable PATHS = [
+                "DMD",
+                "HOST_DMD",
+                "LIB",
+                "RESULTS_DIR",
+            ];
+
+            if (PATHS.canFind(key))
+                value = relativePosixPath(value, scriptDir);
+
+            // Export as env. variable if unset
+            wrapper.write(`[ -z "${`, key, `+x}" ] && export `, key, `='`, value, "' ;\n");
+        }
+    }}
 
     shared uint failCount = 0;
     foreach (tool; tools.parallel(1))
@@ -255,7 +277,7 @@ void ensureToolsExists(string[string] env, const TestTool[] tools ...)
         else
         {
             string[] command;
-            string[string] commandEnv = null;
+            bool overrideEnv;
             if (tool.linksWithTests)
             {
                 // This will compile the dshell library thus needs the actual
@@ -268,7 +290,7 @@ void ensureToolsExists(string[string] env, const TestTool[] tools ...)
                     "-c",
                     sourceFile
                 ] ~ getPicFlags(env);
-                commandEnv = env;
+                overrideEnv = true;
             }
             else
             {
@@ -277,12 +299,12 @@ void ensureToolsExists(string[string] env, const TestTool[] tools ...)
                     "-m"~env["MODEL"],
                     "-of"~targetBin,
                     sourceFile
-                ] ~ tool.extraArgs;
+                ] ~ getPicFlags(env) ~ tool.extraArgs;
             }
 
             writefln("Executing: %-(%s %)", command);
             stdout.flush();
-            if (spawnProcess(command, commandEnv).wait)
+            if (spawnProcess(command, overrideEnv ? env : null).wait)
             {
                 stderr.writefln("failed to build '%s'", targetBin);
                 atomicOp!"+="(failCount, 1);
@@ -347,7 +369,7 @@ auto predefinedTargets(string[] targets)
 {
     static findFiles(string dir)
     {
-        return testPath(dir).dirEntries("*{.d,.sh}", SpanMode.shallow).map!(e => e.name);
+        return testPath(dir).dirEntries("*{.d,.c,.sh}", SpanMode.shallow).map!(e => e.name);
     }
 
     static Target createUnitTestTarget()
@@ -417,7 +439,7 @@ auto predefinedTargets(string[] targets)
 }
 
 // Removes targets that do not need updating (i.e. their .out file exists and is newer than the source file)
-auto filterTargets(Target[] targets, string[string] env)
+auto filterTargets(Target[] targets, const string[string] env)
 {
     bool error;
     foreach (target; targets)
@@ -517,15 +539,11 @@ string[string] getEnvironment()
         auto druntimePath = environment.get("DRUNTIME_PATH", testPath(`../../druntime`));
         auto phobosPath = environment.get("PHOBOS_PATH", testPath(`../../phobos`));
 
-        // default to PIC on x86_64, use PIC=1/0 to en-/disable PIC.
+        // default to PIC, use PIC=1/0 to en-/disable PIC.
         // Note that shared libraries and C files are always compiled with PIC.
-        bool pic;
-        version(X86_64)
-            pic = true;
-        else version(X86)
+        bool pic = true;
+        if (environment.get("PIC", "") == "0")
             pic = false;
-        if (environment.get("PIC", "0") == "1")
-            pic = true;
 
         env["PIC_FLAG"]  = pic ? "-fPIC" : "";
         env["DFLAGS"] = "-I%s/import -I%s".format(druntimePath, phobosPath)
@@ -569,7 +587,7 @@ auto objName(T)(T name)
 }
 
 /// Return the correct pic flags as an array of strings
-string[] getPicFlags(string[string] env)
+string[] getPicFlags(const string[string] env)
 {
     version(Windows) {} else
     {

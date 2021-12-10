@@ -22,13 +22,15 @@ if [ -z ${CI_DFLAGS+x} ] ; then CI_DFLAGS=""; fi
 CURL_USER_AGENT="DMD-CI $(curl --version | head -n 1)"
 build_path=generated/$OS_NAME/release/$MODEL
 
-# use faster ld.gold linker on linux
 if [ "$OS_NAME" == "linux" ]; then
-    mkdir -p linker
-    rm -f linker/ld
-    ln -s /usr/bin/ld.gold linker/ld
+    # use faster ld.gold linker on x86_64-linux
+    if [ "$MODEL" == "64" ]; then
+        mkdir -p linker
+        rm -f linker/ld
+        ln -s /usr/bin/ld.gold linker/ld
+        export PATH="$PWD/linker:$PATH"
+    fi
     NM="nm --print-size"
-    export PATH="$PWD/linker:$PATH"
 else
     NM=nm
 fi
@@ -50,9 +52,10 @@ clone() {
     done
 }
 
-# build dmd, druntime, phobos
+# build dmd (incl. building and running the unittests), druntime, phobos
 build() {
     source ~/dlang/*/activate # activate host compiler, incl. setting `DMD`
+    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=$DMD DFLAGS="$CI_DFLAGS" BUILD=debug ENABLE_WARNINGS=1 unittest
     make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=$DMD DFLAGS="$CI_DFLAGS" ENABLE_RELEASE=1 ENABLE_WARNINGS=1 all
     make -j$N -C ../druntime -f posix.mak MODEL=$MODEL
     make -j$N -C ../phobos -f posix.mak MODEL=$MODEL
@@ -69,7 +72,7 @@ rebuild() {
     cp $build_path/dmd _${build_path}/host_dmd
     cp $build_path/dmd.conf _${build_path}
     make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd clean
-    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd ENABLE_RELEASE=1 ENABLE_WARNINGS=1 all
+    make -j$N -C src -f posix.mak MODEL=$MODEL HOST_DMD=../_${build_path}/host_dmd ENABLE_RELEASE=${ENABLE_RELEASE:-1} ENABLE_WARNINGS=1 all
 
     # compare binaries to test reproducible build
     if [ $compare -eq 1 ]; then
@@ -207,6 +210,12 @@ install_host_compiler() {
   fi
 }
 
+# Upload coverage reports
+codecov()
+{
+    source ci/codecov.sh
+}
+
 # Define commands
 
 if [ "$#" -gt 0 ]; then
@@ -221,6 +230,7 @@ if [ "$#" -gt 0 ]; then
     test_phobos) test_phobos ;;
     test_dub_package) test_dub_package ;;
     testsuite) testsuite ;;
+    codecov) codecov ;;
     *) echo "Unknown command: $1" >&2; exit 1 ;;
   esac
 fi

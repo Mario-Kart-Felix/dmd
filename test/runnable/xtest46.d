@@ -4107,14 +4107,6 @@ static assert(!is(typeof(bug6389 = bug6389)));
 
 /***************************************************/
 
-void test10927()
-{
-    static assert( (1+2i) ^^ 3 == -11 - 2i );
-    auto a = (1+2i) ^^ 3;
-}
-
-/***************************************************/
-
 void test4963()
 {
     struct Value {
@@ -4911,7 +4903,7 @@ static assert(is(typeof(S5933d.x) == FuncType5933));
 
 
 class C5933a { auto x() { return 0; } }
-static assert(is(typeof(&(new C5933b()).x) == int delegate()));
+static assert(is(typeof(&(new C5933b()).x) == int delegate() pure nothrow @nogc @safe));
 
 class C5933b { auto x() { return 0; } }
 //static assert(is(typeof((new C5933b()).x) == FuncType5933));
@@ -7931,8 +7923,9 @@ void test17349()
 {
     static struct S
     {
-        int bar(void delegate(ref int*)) { return 1; }
-        int bar(void delegate(ref const int*)) const { return 2; }
+        // Specify attribute inferred for dg1/dg2
+        int bar(void delegate(ref int*) pure nothrow @nogc @safe) { return 1; }
+        int bar(void delegate(ref const int*) pure nothrow @nogc @safe) const { return 2; }
     }
 
     void dg1(ref int*) { }

@@ -1,7 +1,7 @@
 /**
  * Convert a D symbol to a symbol the linker understands (with mangled name).
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/tocsym.d, _tocsym.d)
@@ -19,6 +19,7 @@ import dmd.root.rmem;
 
 import dmd.aggregate;
 import dmd.arraytypes;
+import dmd.astenums;
 import dmd.complex;
 import dmd.ctfeexpr;
 import dmd.declaration;
@@ -68,7 +69,7 @@ Symbol *toSymbolX(Dsymbol ds, const(char)* prefix, int sclass, type *t, const(ch
 {
     //printf("Dsymbol::toSymbolX('%s')\n", prefix);
     import core.stdc.stdlib : malloc, free;
-    import dmd.root.outbuffer : OutBuffer;
+    import dmd.common.outbuffer : OutBuffer;
 
     OutBuffer buf;
     mangleToBuffer(ds, &buf);
@@ -138,7 +139,7 @@ Symbol *toSymbol(Dsymbol s)
             assert(!vd.needThis());
 
             const(char)[] id;
-            import dmd.root.outbuffer : OutBuffer;
+            import dmd.common.outbuffer : OutBuffer;
             OutBuffer buf;
             bool isNRVO = false;
             if (vd.isDataseg())
@@ -161,7 +162,7 @@ Symbol *toSymbol(Dsymbol s)
                 }
             }
             Symbol *s = symbol_calloc(id.ptr, cast(uint)id.length);
-            s.Salignment = vd.alignment;
+            s.Salignment = vd.alignment.isDefault() ? -1 : vd.alignment.get();
             if (vd.storage_class & STC.temp)
                 s.Sflags |= SFLartifical;
             if (isNRVO)
@@ -175,24 +176,16 @@ Symbol *toSymbol(Dsymbol s)
             }
             else if (vd.storage_class & STC.lazy_)
             {
-                if (global.params.targetOS == TargetOS.Windows && global.params.is64bit && vd.isParameter())
+                if (target.os == Target.OS.Windows && target.is64bit && vd.isParameter())
                     t = type_fake(TYnptr);
                 else
                     t = type_fake(TYdelegate);          // Tdelegate as C type
                 t.Tcount++;
             }
-            else if (vd.isParameter())
+            else if (vd.isParameter() && ISX64REF(vd))
             {
-                if (ISX64REF(vd))
-                {
-                    t = type_allocn(TYnref, Type_toCtype(vd.type));
-                    t.Tcount++;
-                }
-                else
-                {
-                    t = Type_toCtype(vd.type);
-                    t.Tcount++;
-                }
+                t = type_allocn(TYnref, Type_toCtype(vd.type));
+                t.Tcount++;
             }
             else
             {
@@ -286,7 +279,7 @@ Symbol *toSymbol(Dsymbol s)
             final switch (vd.linkage)
             {
                 case LINK.windows:
-                    m = global.params.is64bit ? mTYman_c : mTYman_std;
+                    m = target.is64bit ? mTYman_c : mTYman_std;
                     break;
 
                 case LINK.objc:
@@ -313,7 +306,7 @@ Symbol *toSymbol(Dsymbol s)
             type_setmangle(&t, m);
             s.Stype = t;
 
-            s.lnoscopestart = vd.loc.linnum;
+            s.lposscopestart = toSrcpos(vd.loc);
             s.lnoscopeend = vd.endlinnum;
             result = s;
         }
@@ -354,15 +347,11 @@ Symbol *toSymbol(Dsymbol s)
             else if (fd.isMember2() && fd.isStatic())
                 f.Fflags |= Fstatic;
 
-            f.Fstartline.set(fd.loc.filename, fd.loc.linnum, fd.loc.charnum);
-            if (fd.endloc.linnum)
-            {
-                f.Fendline.set(fd.endloc.filename, fd.endloc.linnum, fd.endloc.charnum);
-            }
-            else
-            {
-                f.Fendline = f.Fstartline;
-            }
+            if (fd.type.toBasetype().isTypeFunction().nextOf().isTypeNoreturn() || fd.flags & FUNCFLAG.noreturn)
+                s.Sflags |= SFLexit;    // the function never returns
+
+            f.Fstartline = toSrcpos(fd.loc);
+            f.Fendline = fd.endloc.linnum ? toSrcpos(fd.endloc) : f.Fstartline;
 
             auto t = Type_toCtype(fd.type);
             const msave = t.Tmangle;
@@ -370,13 +359,14 @@ Symbol *toSymbol(Dsymbol s)
             {
                 t.Tty = TYnfunc;
                 t.Tmangle = mTYman_c;
+                f.Fflags3 |= Fmain;
             }
             else
             {
                 final switch (fd.linkage)
                 {
                     case LINK.windows:
-                        t.Tmangle = global.params.is64bit ? mTYman_c : mTYman_std;
+                        t.Tmangle = target.is64bit ? mTYman_c : mTYman_std;
                         break;
 
                     case LINK.c:
@@ -389,7 +379,9 @@ Symbol *toSymbol(Dsymbol s)
                         break;
                     case LINK.cpp:
                         s.Sflags |= SFLpublic;
-                        if (fd.isThis() && !global.params.is64bit && global.params.targetOS == TargetOS.Windows)
+                        /* Nested functions use the same calling convention as
+                         * member functions, because both can be used as delegates. */
+                        if ((fd.isThis() || fd.isNested()) && !target.is64bit && target.os == Target.OS.Windows)
                         {
                             if ((cast(TypeFunction)fd.type).parameterList.varargs == VarArg.variadic)
                             {
@@ -476,28 +468,28 @@ Symbol *toSymbol(Dsymbol s)
 /*************************************
  */
 
-Symbol *toImport(Symbol *sym)
+Symbol *toImport(Symbol *sym, Loc loc)
 {
     //printf("Dsymbol.toImport('%s')\n", sym.Sident);
     char *n = sym.Sident.ptr;
     import core.stdc.stdlib : alloca;
     char *id = cast(char *) alloca(6 + strlen(n) + 1 + type_paramsize(sym.Stype).sizeof*3 + 1);
     int idlen;
-    if (global.params.targetOS & TargetOS.Posix)
+    if (target.os & Target.OS.Posix)
     {
-        id = n;
-        idlen = cast(int)strlen(n);
+        error(loc, "Could not generate import symbol for this platform");
+        fatal();
     }
     else if (sym.Stype.Tmangle == mTYman_std && tyfunc(sym.Stype.Tty))
     {
-        if (global.params.targetOS == TargetOS.Windows && global.params.is64bit)
+        if (target.os == Target.OS.Windows && target.is64bit)
             idlen = sprintf(id,"__imp_%s",n);
         else
             idlen = sprintf(id,"_imp__%s@%u",n,cast(uint)type_paramsize(sym.Stype));
     }
     else
     {
-        idlen = sprintf(id,(global.params.targetOS == TargetOS.Windows && global.params.is64bit) ? "__imp_%s" : "_imp__%s",n);
+        idlen = sprintf(id,(target.os == Target.OS.Windows && target.is64bit) ? "__imp_%s" : (sym.Stype.Tmangle == mTYman_cpp) ? "_imp_%s" : "_imp__%s",n);
     }
     auto t = type_alloc(TYnptr | mTYconst);
     t.Tnext = sym.Stype;
@@ -521,7 +513,7 @@ Symbol *toImport(Dsymbol ds)
     {
         if (!ds.csym)
             ds.csym = toSymbol(ds);
-        ds.isym = toImport(ds.csym);
+        ds.isym = toImport(ds.csym, ds.loc);
     }
     return ds.isym;
 }
@@ -604,16 +596,22 @@ Symbol *toInitializer(AggregateDeclaration ad)
         static structalign_t alignOf(Type t)
         {
             const explicitAlignment = t.alignment();
-            return explicitAlignment == STRUCTALIGN_DEFAULT ? t.alignsize() : explicitAlignment;
+            if (!explicitAlignment.isDefault()) // if overriding default alignment
+                return explicitAlignment;
+
+            // Use the default alignment for type t
+            structalign_t sa;
+            sa.set(t.alignsize());
+            return sa;
         }
 
         auto sd = ad.isStructDeclaration();
         if (sd &&
-            alignOf(sd.type) <= 16 &&
+            alignOf(sd.type).get() <= 16 &&
             sd.type.size() <= 128 &&
             sd.zeroInit &&
             config.objfmt != OBJ_MACH && // same reason as in toobj.d toObjFile()
-            !(config.objfmt == OBJ_MSCOFF && !global.params.is64bit)) // -m32mscoff relocations are wrong
+            !(config.objfmt == OBJ_MSCOFF && !target.is64bit)) // -m32mscoff relocations are wrong
         {
             auto bzsave = bzeroSymbol;
             ad.sinit = getBzeroSymbol();
@@ -629,11 +627,11 @@ Symbol *toInitializer(AggregateDeclaration ad)
             s.Sfl = FLextern;
             s.Sflags |= SFLnodebug;
             if (sd)
-                s.Salignment = sd.alignment;
+                s.Salignment = sd.alignment.isDefault() ? -1 : sd.alignment.get();
             ad.sinit = s;
         }
     }
-    return ad.sinit;
+    return cast(Symbol*)ad.sinit;
 }
 
 Symbol *toInitializer(EnumDeclaration ed)
@@ -789,4 +787,16 @@ Symbol *toSymbolCppTypeInfo(ClassDeclaration cd)
     t.Tcount++;
     s.Stype = t;
     return s;
+}
+
+/**********************************
+ * Converts a Loc to backend Srcpos
+ * Params:
+ *      loc = Source code location
+ * Returns:
+ *      Srcpos backend struct corresponding to the given location
+ */
+Srcpos toSrcpos(Loc loc)
+{
+    return Srcpos.create(loc.filename, loc.linnum, loc.charnum);
 }

@@ -3,7 +3,7 @@
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      https://github.com/dlang/dmd/blob/master/src/dmd/backend/dtype.d
@@ -52,6 +52,7 @@ version (SCPP_HTOD)
 extern (C++):
 
 nothrow:
+@safe:
 
 alias MEM_PH_MALLOC = mem_malloc;
 alias MEM_PH_CALLOC = mem_calloc;
@@ -64,8 +65,10 @@ alias MEM_PARF_FREE = mem_free;
 alias MEM_PARF_STRDUP = mem_strdup;
 
 version (SCPP_HTOD)
+    @trusted
     struct_t* struct_calloc();
 else
+    @trusted
     struct_t* struct_calloc() { return cast(struct_t*) mem_calloc(struct_t.sizeof); }
 
 int REGSIZE();
@@ -101,6 +104,7 @@ __gshared
 
 version (SCPP_HTOD)
 {
+@trusted
 targ_size_t type_size(type* t)
 {
     switch (tybasic(t.Tty))
@@ -146,6 +150,7 @@ targ_size_t type_size(type* t)
  * Returns:
  *      size
  */
+@trusted
 targ_size_t type_size(const type *t)
 {   targ_size_t s;
     tym_t tyb;
@@ -258,7 +263,7 @@ version (SCPP_HTOD)
 }
 
             default:
-                debug WRTYxx(t.Tty);
+                debug printf("%s\n", tym_str(t.Tty));
                 assert(0);
         }
     }
@@ -269,6 +274,7 @@ version (SCPP_HTOD)
  * Return the size of a type for alignment purposes.
  */
 
+@trusted
 uint type_alignsize(type *t)
 {   targ_size_t sz;
 
@@ -317,9 +323,10 @@ L1:
  * Returns:
  *      true if it is
  */
+@trusted
 bool type_zeroSize(type *t, tym_t tyf)
 {
-    if (tyf != TYjfunc && config.exe & (EX_FREEBSD | EX_OSX))
+    if (tyf != TYjfunc && config.exe & (EX_FREEBSD | EX_OPENBSD | EX_OSX))
     {
         /* Use clang convention for 0 size structs
          */
@@ -371,6 +378,7 @@ uint type_parameterSize(type *t, tym_t tyf)
  *   total stack usage in bytes
  */
 
+@trusted
 uint type_paramsize(type *t)
 {
     targ_size_t sz = 0;
@@ -393,9 +401,9 @@ uint type_paramsize(type *t)
  *      pointer to newly created type.
  */
 
+@trusted
 type *type_alloc(tym_t ty)
 {   type *t;
-    __gshared type tzero;
 
     assert(tybasic(ty) != TYtemplate);
     if (type_list)
@@ -404,8 +412,8 @@ type *type_alloc(tym_t ty)
     }
     else
         t = cast(type *) mem_fmalloc(type.sizeof);
-    tzero.Tty = ty;
-    *t = tzero;
+    *t = type();
+    t.Tty = ty;
 version (SRCPOS_4TYPES)
 {
     if (PARSER && config.fulltypes)
@@ -418,7 +426,7 @@ debug
     if (type_num > type_max)
         type_max = type_num;
 }
-    //printf("type_alloc() = %p ",t); WRTYxx(t.Tty); printf("\n");
+    //printf("type_alloc() = %p %s\n", t, tym_str(t.Tty));
     //if (t == (type*)0xB6B744) *(char*)0=0;
     return t;
 }
@@ -449,7 +457,7 @@ debug
     type_num++;
     if (type_num > type_max)
         type_max = type_num;
-    //printf("Alloc'ing template type %p ",t); WRTYxx(t.Tty); printf("\n");
+    //printf("Alloc'ing template type %p %s", t, tym_str(t.Tty));
 }
     return t;
 }
@@ -531,7 +539,7 @@ type *type_pointer(type *tnext)
  * Returns:
  *      Tcount already incremented
  */
-
+@trusted
 type *type_dyn_array(type *tnext)
 {
     type *t = type_allocn(TYdarray, tnext);
@@ -560,6 +568,7 @@ extern (C) type *type_static_array(targ_size_t dim, type *tnext)
  *      Tcount already incremented
  */
 
+@trusted
 type *type_assoc_array(type *tkey, type *tvalue)
 {
     type *t = type_allocn(TYaarray, tvalue);
@@ -575,6 +584,7 @@ type *type_assoc_array(type *tkey, type *tvalue)
  *      Tcount already incremented
  */
 
+@trusted
 type *type_delegate(type *tnext)
 {
     type *t = type_allocn(TYdelegate, tnext);
@@ -592,6 +602,7 @@ type *type_delegate(type *tnext)
  * Returns:
  *      Tcount already incremented
  */
+@trusted
 extern (C)
 type *type_function(tym_t tyf, type*[] ptypes, bool variadic, type *tret)
 {
@@ -617,6 +628,7 @@ type *type_function(tym_t tyf, type*[] ptypes, bool variadic, type *tret)
  * Returns:
  *      Tcount already incremented
  */
+@trusted
 type *type_enum(const(char)* name, type *tbase)
 {
     Symbol *s = symbol_calloc(name);
@@ -640,9 +652,24 @@ type *type_enum(const(char)* name, type *tbase)
  * Returns:
  *      Tcount already incremented
  */
+@trusted
 type *type_struct_class(const(char)* name, uint alignsize, uint structsize,
         type *arg1type, type *arg2type, bool isUnion, bool isClass, bool isPOD, bool is0size)
 {
+    static if (0)
+    {
+        printf("type_struct_class(%s, %p, %p)\n", name, arg1type, arg2type);
+        if (arg1type)
+        {
+            printf("arg1type:\n");
+            type_print(arg1type);
+        }
+        if (arg2type)
+        {
+            printf("arg2type:\n");
+            type_print(arg2type);
+        }
+    }
     Symbol *s = symbol_calloc(name);
     s.Sclass = SCstruct;
     s.Sstruct = struct_calloc();
@@ -675,6 +702,7 @@ type *type_struct_class(const(char)* name, uint alignsize, uint structsize,
  * Free up data type.
  */
 
+@trusted
 void type_free(type *t)
 {   type *tn;
     tym_t ty;
@@ -728,7 +756,7 @@ version (MARS)
 debug
 {
         type_num--;
-        //printf("Free'ing type %p ",t); WRTYxx(t.Tty); printf("\n");
+        //printf("Free'ing type %p %s\n", t, tym_str(t.Tty));
         t.id = 0;                      /* no longer a valid type       */
 }
 
@@ -766,6 +794,7 @@ private type * type_allocbasic(tym_t ty)
     return t;
 }
 
+@trusted
 void type_init()
 {
     tstypes[TYbool]    = type_allocbasic(TYbool);
@@ -915,6 +944,7 @@ debug
  * Make copy of a type.
  */
 
+@trusted
 type *type_copy(type *t)
 {   type *tn;
     param_t *p;
@@ -1138,6 +1168,7 @@ type *type_setdependent(type *t)
  * Determine if type t is a dependent type.
  */
 
+@trusted
 int type_isdependent(type *t)
 {
     Symbol *stempl;
@@ -1191,6 +1222,7 @@ Lisdependent:
  *      != 0 if embedded
  */
 
+@trusted
 int type_embed(type *t,type *u)
 {   param_t *p;
 
@@ -1232,10 +1264,11 @@ int type_isvla(type *t)
  * Pretty-print a type.
  */
 
+@trusted
 void type_print(const type *t)
 {
   type_debug(t);
-  printf("Tty="); WRTYxx(t.Tty);
+  printf("Tty=%s", tym_str(t.Tty));
   printf(" Tmangle=%d",t.Tmangle);
   printf(" Tflags=x%x",t.Tflags);
   printf(" Tcount=%d",t.Tcount);
@@ -1310,6 +1343,7 @@ printf("Pident=%p,Ptype=%p,Pelem=%p,Pnext=%p ",p.Pident,p.Ptype,p.Pelem,p.Pnext)
  * Pretty-print a param_t
  */
 
+@trusted
 void param_t_print(const param_t* p)
 {
     printf("Pident=%p,Ptype=%p,Pelem=%p,Psym=%p,Pnext=%p\n",p.Pident,p.Ptype,p.Pelem,p.Psym,p.Pnext);
@@ -1459,6 +1493,7 @@ version (DEBUG_XSYMGEN)
  * Allocate a param_t.
  */
 
+@trusted
 param_t *param_calloc()
 {
     static param_t pzero;
@@ -1503,6 +1538,7 @@ param_t *param_append_type(param_t **pp,type *t)
  * Version of param_free() suitable for list_free().
  */
 
+@trusted
 void param_free_l(param_t *p)
 {
     param_free(&p);
@@ -1514,6 +1550,7 @@ void param_free_l(param_t *p)
  *      paramlst = null
  */
 
+@trusted
 void param_free(param_t **pparamlst)
 {   param_t* p,pn;
 
@@ -1556,6 +1593,7 @@ uint param_t_length(param_t* p)
  *      ptali   initial template-argument-list
  */
 
+@trusted
 param_t *param_t_createTal(param_t* p, param_t *ptali)
 {
 version (SCPP_HTOD)
@@ -1608,6 +1646,7 @@ version (SCPP_HTOD)
  * Look for Pident matching id
  */
 
+@trusted
 param_t *param_t_search(param_t* p, char *id)
 {
     for (; p; p = p.Pnext)
@@ -1622,6 +1661,7 @@ param_t *param_t_search(param_t* p, char *id)
  * Look for Pident matching id
  */
 
+@trusted
 int param_t_searchn(param_t* p, char *id)
 {
     int n = 0;
@@ -1641,6 +1681,7 @@ int param_t_searchn(param_t* p, char *id)
  *      void func(int n, int a[n]);
  */
 
+@trusted
 Symbol *param_search(const(char)* name, param_t **pp)
 {   Symbol *s = null;
     param_t *p;
@@ -1739,8 +1780,6 @@ void param_dehydrate(param_t **pp)
 version (MARS)
 {
 
-int typematch(type *t1, type *t2, int relax);
-
 // Return TRUE if type lists match.
 private int paramlstmatch(param_t *p1,param_t *p2)
 {
@@ -1759,6 +1798,7 @@ private int paramlstmatch(param_t *p1,param_t *p2)
  *      !=0 if types match.
  */
 
+@trusted
 int typematch(type *t1,type *t2,int relax)
 { tym_t t1ty, t2ty;
   tym_t tym;

@@ -159,6 +159,7 @@ Command-line parameters
     // A more proper solution would be to redirect DMD's output to this script's
     // output using `std.process`', but it's more involved and the following
     // "just works"
+    version(Posix) // UPDATE: only when ANSII color codes are supported, that is. Don't do this on Windows.
     if (!flags["DFLAGS"].canFind("-color=off") &&
         [env["HOST_DMD_RUN"], "-color=on", "-h"].tryRun().status == 0)
         flags["DFLAGS"] ~= "-color=on";
@@ -255,7 +256,7 @@ alias autoTesterBuild = makeRule!((builder, rule) {
     builder
     .name("auto-tester-build")
     .description("Run the autotester build")
-    .deps([toolchainInfo, dmdDefault, checkwhitespace]);
+    .deps([toolchainInfo, dmdDefault, checkwhitespace, validateCommonBetterC]);
 
     version (Posix)
         rule.deps ~= runCxxUnittest;
@@ -275,12 +276,17 @@ alias lexer = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule 
     .name("lexer")
     .target(env["G"].buildPath("lexer" ~ suffix).objName)
     .sources(sources.lexer)
-    .deps([versionFile, sysconfDirFile])
+    .deps([
+        versionFile,
+        sysconfDirFile,
+        common(suffix, extraFlags)
+    ])
     .msg("(DC) LEXER" ~ suffix)
     .command([env["HOST_DMD_RUN"],
         "-c",
         "-of" ~ rule.target,
-        "-vtls"]
+        "-vtls",
+        "-J" ~ env["RES"]]
         .chain(flags["DFLAGS"],
             extraFlags,
             // source files need to have relative paths in order for the code coverage
@@ -314,7 +320,7 @@ DFLAGS=%DFLAGS% -L/OPT:NOICF
     {
         enum confFile = "dmd.conf";
         enum conf = `[Environment32]
-DFLAGS=-I%@P%/../../../../../druntime/import -I%@P%/../../../../../phobos -L-L%@P%/../../../../../phobos/generated/{OS}/{BUILD}/32{exportDynamic}
+DFLAGS=-I%@P%/../../../../../druntime/import -I%@P%/../../../../../phobos -L-L%@P%/../../../../../phobos/generated/{OS}/{BUILD}/32{exportDynamic} -fPIC
 
 [Environment64]
 DFLAGS=-I%@P%/../../../../../druntime/import -I%@P%/../../../../../phobos -L-L%@P%/../../../../../phobos/generated/{OS}/{BUILD}/64{exportDynamic} -fPIC
@@ -335,12 +341,43 @@ DFLAGS=-I%@P%/../../../../../druntime/import -I%@P%/../../../../../phobos -L-L%@
         });
 });
 
+/// Returns: the rule that builds the common object file
+alias common = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule,
+                                   string suffix, string[] extraFlags) => builder
+    .name("common")
+    .target(env["G"].buildPath("common" ~ suffix).objName)
+    .sources(sources.common)
+    .msg("(DC) COMMON" ~ suffix)
+    .command([
+        env["HOST_DMD_RUN"],
+        "-c",
+        "-of" ~ rule.target,
+        ]
+        .chain(
+            flags["DFLAGS"], extraFlags,
+
+            // source files need to have relative paths in order for the code coverage
+            // .lst files to be named properly for CodeCov to find them
+            rule.sources.map!(e => e.relativePath(dmdRepo))
+        ).array)
+);
+
+
+alias validateCommonBetterC = makeRule!((builder, rule) => builder
+    .name("common-betterc")
+    .description("Verify that common is -betterC compatible")
+    .deps([ common("-betterc", ["-betterC"]) ])
+);
+
 /// Returns: the rule that builds the backend object file
 alias backend = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule,
                                    string suffix, string[] extraFlags) => builder
     .name("backend")
     .target(env["G"].buildPath("backend" ~ suffix).objName)
     .sources(sources.backend)
+    .deps([
+        common(suffix, extraFlags)
+    ])
     .msg("(DC) BACKEND" ~ suffix)
     .command([
         env["HOST_DMD_RUN"],
@@ -418,12 +455,13 @@ alias dmdExe = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule
 
     auto lexer = lexer(targetSuffix, depFlags);
     auto backend = backend(targetSuffix, depFlags);
+    auto common = common(targetSuffix, depFlags);
     builder
-        // include lexer.o and backend.o
-        .sources(dmdSources.chain(lexer.targets, backend.targets).array)
+        // include lexer.o, common.o, and backend.o
+        .sources(dmdSources.chain(lexer.targets, backend.targets, common.targets).array)
         .target(env["DMD_PATH"] ~ targetSuffix)
         .msg("(DC) DMD" ~ targetSuffix)
-        .deps([versionFile, sysconfDirFile, lexer, backend])
+        .deps([versionFile, sysconfDirFile, lexer, backend, common])
         .command([
             env["HOST_DMD_RUN"],
             "-of" ~ rule.target,
@@ -486,7 +524,7 @@ BuildRule to run the DMD frontend header generation
 For debugging, use `./build.d cxx-headers DFLAGS="-debug=Debug_DtoH"` (clean before)
 */
 alias buildFrontendHeaders = makeRule!((builder, rule) {
-    const dmdSources = sources.dmd.frontend ~ sources.root ~ sources.lexer;
+    const dmdSources = sources.dmd.frontend ~ sources.root ~ sources.common ~ sources.lexer;
     const dmdExeFile = dmdDefault.deps[0].target;
     builder
         .name("cxx-headers")
@@ -557,7 +595,7 @@ alias runCxxUnittest = makeRule!((runCxxBuilder, runCxxRule) {
         .name("cxx-frontend")
         .description("Build the C++ frontend")
         .msg("(CXX) CXX-FRONTEND")
-        .sources(srcDir.buildPath("tests", "cxxfrontend.c") ~ .sources.frontendHeaders ~ .sources.rootHeaders ~ .sources.dmd.driver ~ .sources.dmd.frontend ~ .sources.root)
+        .sources(srcDir.buildPath("tests", "cxxfrontend.c") ~ .sources.frontendHeaders ~ .sources.commonHeaders ~ .sources.rootHeaders /* Andrei ~ .sources.dmd.driver ~ .sources.dmd.frontend ~ .sources.root*/)
         .target(env["G"].buildPath("cxxfrontend").objName)
         // No explicit if since CXX_KIND will always be either g++ or clang++
         .command([ env["CXX"], "-xc++", "-std=c++11",
@@ -569,7 +607,7 @@ alias runCxxUnittest = makeRule!((runCxxBuilder, runCxxRule) {
         .description("Build the C++ unittests")
         .msg("(DMD) CXX-UNITTEST")
         .deps([lexer(null, null), cxxFrontend])
-        .sources(sources.dmd.driver ~ sources.dmd.frontend ~ sources.root)
+        .sources(sources.dmd.driver ~ sources.dmd.frontend ~ sources.root ~ sources.common)
         .target(env["G"].buildPath("cxx-unittest").exeName)
         .command([ env["HOST_DMD_RUN"], "-of=" ~ exeRule.target, "-vtls", "-J" ~ env["RES"],
                     "-L-lstdc++", "-version=NoMain", "-version=NoBackend"
@@ -770,7 +808,7 @@ alias html = makeRule!((htmlBuilder, htmlRule) {
         return htmlFilePrefix ~ ".html";
     }
     const stddocs = env.get("STDDOC", "").split();
-    auto docSources = .sources.root ~ .sources.lexer ~ .sources.dmd.all ~ env["D"].buildPath("frontend.d");
+    auto docSources = .sources.common ~ .sources.root ~ .sources.lexer ~ .sources.dmd.all ~ env["D"].buildPath("frontend.d");
     htmlBuilder.deps(docSources.chunks(1).map!(sourceArray =>
         methodInit!(BuildRule, (docBuilder, docRule) {
             const source = sourceArray[0];
@@ -874,7 +912,16 @@ alias install = makeRule!((builder, rule) {
             installRelativeFiles(env["INSTALL"], dmdRepo, sourceFiles);
 
         const scPath = buildPath(env["OS"], bin, conf);
-        copyAndTouch(buildPath(dmdRepo, "ini", scPath), buildPath(env["INSTALL"], scPath));
+        const iniPath = buildPath(dmdRepo, "ini");
+
+        // The sources distributed alongside an official release only include the
+        // configuration of the current OS at the root directory instead of the
+        // whole `ini` folder in the project root.
+        const confPath = iniPath.exists()
+                        ? buildPath(iniPath, scPath)
+                        : buildPath(dmdRepo, "..", scPath);
+
+        copyAndTouch(confPath, buildPath(env["INSTALL"], scPath));
 
         version (Posix)
             copyAndTouch(sourceFiles[$-1], env["INSTALL"].buildPath("dmd-boostlicense.txt"));
@@ -1010,14 +1057,9 @@ void parseEnvironment()
     // detect PIC
     version(Posix)
     {
-        // default to PIC on x86_64, use PIC=1/0 to en-/disable PIC.
+        // default to PIC if the host compiler supports, use PIC=1/0 to en-/disable PIC.
         // Note that shared libraries and C files are always compiled with PIC.
-        bool pic;
-        if (model == "64")
-            pic = true;
-        else if (model == "32")
-            pic = false;
-
+        bool pic = true;
         const picValue = env.getDefault("PIC", "");
         switch (picValue)
         {
@@ -1026,6 +1068,15 @@ void parseEnvironment()
             case "1": pic = true; break;
             default:
                 throw abortBuild(format("Variable 'PIC' should be '0', '1' or <empty> but got '%s'", picValue));
+        }
+        version (X86)
+        {
+            // https://issues.dlang.org/show_bug.cgi?id=20466
+            static if (__VERSION__ < 2090)
+            {
+                pragma(msg, "Warning: PIC will be off by default for this build of DMD because of Issue 20466!");
+                pic = false;
+            }
         }
 
         env["PIC_FLAG"]  = pic ? "-fPIC" : "";
@@ -1039,7 +1090,7 @@ void parseEnvironment()
     env.setDefault("GIT_HOME", "https://github.com/dlang");
     env.setDefault("SYSCONFDIR", "/etc");
     env.setDefault("TMP", tempDir);
-    env.setDefault("RES", dmdRepo.buildPath("src/dmd/res"));
+    env.setDefault("RES", srcDir.buildPath("dmd", "res"));
     env.setDefault("MAKE", "make");
 
     version (Windows)
@@ -1055,6 +1106,7 @@ void parseEnvironment()
 
     auto d = env["D"] = srcDir.buildPath("dmd");
     env["C"] = d.buildPath("backend");
+    env["COMMON"] = d.buildPath("common");
     env["ROOT"] = d.buildPath("root");
     env["EX"] = srcDir.buildPath("examples");
     auto generated = env["GENERATED"] = dmdRepo.buildPath("generated");
@@ -1287,8 +1339,10 @@ alias buildFiles = memoize!(() => "win32.mak posix.mak osmodel.mak build.d".spli
 alias allBuildSources = memoize!(() => buildFiles
     ~ sources.dmd.all
     ~ sources.lexer
+    ~ sources.common
     ~ sources.backend
     ~ sources.root
+    ~ sources.commonHeaders
     ~ sources.frontendHeaders
     ~ sources.rootHeaders
 );
@@ -1303,7 +1357,7 @@ auto sourceFiles()
     static struct Sources
     {
         DmdSources dmd;
-        string[] lexer, root, backend, frontendHeaders, rootHeaders;
+        string[] lexer, common, root, backend, commonHeaders, frontendHeaders, rootHeaders;
     }
     static string[] fileArray(string dir, string files)
     {
@@ -1319,21 +1373,22 @@ auto sourceFiles()
         "),
         frontend: fileArray(env["D"], "
             access.d aggregate.d aliasthis.d apply.d argtypes_x86.d argtypes_sysv_x64.d argtypes_aarch64.d arrayop.d
-            arraytypes.d ast_node.d astcodegen.d asttypename.d attrib.d blockexit.d builtin.d canthrow.d chkformat.d
+            arraytypes.d astenums.d ast_node.d astcodegen.d asttypename.d attrib.d blockexit.d builtin.d canthrow.d chkformat.d
             cli.d clone.d compiler.d complex.d cond.d constfold.d cppmangle.d cppmanglewin.d ctfeexpr.d
             ctorflow.d dcast.d dclass.d declaration.d delegatize.d denum.d dimport.d
             dinterpret.d dmacro.d dmangle.d dmodule.d doc.d dscope.d dstruct.d dsymbol.d dsymbolsem.d
             dtemplate.d dtoh.d dversion.d env.d escape.d expression.d expressionsem.d func.d hdrgen.d impcnvtab.d
-            imphint.d init.d initsem.d inline.d inlinecost.d intrange.d json.d lambdacomp.d
+            imphint.d importc.d init.d initsem.d inline.d inlinecost.d intrange.d json.d lambdacomp.d
             mtype.d nogc.d nspace.d ob.d objc.d opover.d optimize.d
             parse.d parsetimevisitor.d permissivevisitor.d printast.d safe.d sapply.d
             semantic2.d semantic3.d sideeffect.d statement.d statement_rewrite_walker.d
             statementsem.d staticassert.d staticcond.d stmtstate.d target.d templateparamsem.d traits.d
             transitivevisitor.d typesem.d typinf.d utils.d visitor.d foreachvar.d
+            cparse.d
         "),
         backendHeaders: fileArray(env["C"], "
             cc.d cdef.d cgcv.d code.d cv4.d dt.d el.d global.d
-            obj.d oper.d outbuf.d rtlsym.d code_x86.d iasm.d codebuilder.d
+            obj.d oper.d rtlsym.d code_x86.d iasm.d codebuilder.d
             ty.d type.d exh.d mach.d mscoff.d dwarf.d dwarf2.d xmm.d
             dlist.d melf.d
         "),
@@ -1351,17 +1406,23 @@ auto sourceFiles()
             statement.h staticassert.h target.h template.h tokens.h version.h visitor.h
         "),
         lexer: fileArray(env["D"], "
-            console.d entity.d errors.d filecache.d globals.d id.d identifier.d lexer.d tokens.d utf.d
+            console.d entity.d errors.d file_manager.d globals.d id.d identifier.d lexer.d tokens.d utf.d
         ") ~ fileArray(env["ROOT"], "
-            array.d bitarray.d ctfloat.d file.d filename.d hash.d outbuffer.d port.d region.d rmem.d
+            array.d bitarray.d ctfloat.d file.d filename.d hash.d port.d region.d rmem.d
             rootobject.d stringtable.d
         "),
+        common: fileArray(env["COMMON"], "
+            file.d outbuffer.d string.d
+        "),
+        commonHeaders: fileArray(env["COMMON"], "
+            outbuffer.h
+        "),
         root: fileArray(env["ROOT"], "
-            aav.d longdouble.d man.d response.d speller.d string.d strtold.d
+            aav.d longdouble.d man.d optional.d response.d speller.d string.d strtold.d
         "),
         rootHeaders: fileArray(env["ROOT"], "
             array.h bitarray.h ctfloat.h dcompat.h dsystem.h file.h filename.h longdouble.h
-            object.h outbuffer.h port.h rmem.h root.h
+            object.h optional.h port.h rmem.h root.h
         "),
         backend: fileArray(env["C"], "
             backend.d bcomplex.d evalu8.d divcoeff.d dvec.d go.d gsroa.d glocal.d gdag.d gother.d gflow.d

@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/function.html#nogc-functions, No-GC Functions)
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/nogc.d, _nogc.d)
@@ -15,6 +15,7 @@ module dmd.nogc;
 
 import dmd.aggregate;
 import dmd.apply;
+import dmd.astenums;
 import dmd.declaration;
 import dmd.dscope;
 import dmd.expression;
@@ -121,8 +122,6 @@ public:
         }
         if (e.onstack)
             return;
-        if (e.allocator)
-            return;
         if (global.params.ehnogc && e.thrownew)
             return;                     // separate allocator is called for this, not the GC
         if (f.setGC())
@@ -137,7 +136,7 @@ public:
 
     override void visit(DeleteExp e)
     {
-        if (e.e1.op == TOK.variable)
+        if (e.e1.op == EXP.variable)
         {
             VarDeclaration v = (cast(VarExp)e.e1).var.isVarDeclaration();
             if (v && v.onstack)
@@ -190,7 +189,7 @@ public:
 
     override void visit(AssignExp e)
     {
-        if (e.e1.op == TOK.arrayLength)
+        if (e.e1.op == EXP.arrayLength)
         {
             if (f.setGC())
             {
@@ -231,7 +230,7 @@ public:
 Expression checkGC(Scope* sc, Expression e)
 {
     FuncDeclaration f = sc.func;
-    if (e && e.op != TOK.error && f && sc.intypeof != 1 && !(sc.flags & SCOPE.ctfe) &&
+    if (e && e.op != EXP.error && f && sc.intypeof != 1 && !(sc.flags & SCOPE.ctfe) &&
            (f.type.ty == Tfunction &&
             (cast(TypeFunction)f.type).isnogc || (f.flags & FUNCFLAG.nogcInprocess) || global.params.vgc) &&
            !(sc.flags & SCOPE.debug_))

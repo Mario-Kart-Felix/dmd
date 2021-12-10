@@ -1,7 +1,7 @@
 /**
  * Allocate memory using `malloc` or the GC depending on the configuration.
  *
- * Copyright: Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright: Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:   Walter Bright, http://www.digitalmars.com
  * License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:    $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/root/rmem.d, root/_rmem.d)
@@ -96,7 +96,7 @@ extern (C++) struct Mem
         return check(pureRealloc(p, size));
     }
 
-    static void* error() pure nothrow @nogc
+    static void* error() pure nothrow @nogc @safe
     {
         onOutOfMemoryError();
         assert(0);

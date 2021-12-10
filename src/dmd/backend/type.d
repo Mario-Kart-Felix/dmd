@@ -1,9 +1,11 @@
 /**
+ * Types for the back end
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/type.d, backend/_type.d)
@@ -23,6 +25,7 @@ import dmd.backend.ty;
 extern (C++):
 @nogc:
 nothrow:
+@safe:
 
 // type.h
 
@@ -63,6 +66,9 @@ void type_incCount(type* t);
 void type_setIdent(type* t, char* ident);
 
 void symbol_struct_addField(Symbol* s, const(char)* name, type* t, uint offset);
+void symbol_struct_addBitField(Symbol* s, const(char)* name, type* t, uint offset, uint fieldWidth, uint bitOffset);
+void symbol_struct_hasBitFields(Symbol* s);
+void symbol_struct_addBaseClass(Symbol* s, type* t, uint offset);
 
 // Return true if type is a struct, class or union
 bool type_struct(const type* t) { return tybasic(t.Tty) == TYstruct; }

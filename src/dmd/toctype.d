@@ -1,7 +1,7 @@
 /**
  * Convert a D type to a type the backend understands.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/toctype.d, _toctype.d)
@@ -20,6 +20,7 @@ import dmd.backend.type;
 
 import dmd.root.rmem;
 
+import dmd.astenums;
 import dmd.declaration;
 import dmd.denum;
 import dmd.dstruct;
@@ -142,6 +143,7 @@ public:
                 // Mangle as delegate
                 type* tf = type_function(TYnfunc, null, false, tp);
                 tp = type_delegate(tf);
+                tp.Tident = t.toPrettyChars(true);
             }
             types[i] = tp;
         }
@@ -153,6 +155,7 @@ public:
     override void visit(TypeDelegate t)
     {
         t.ctype = type_delegate(Type_toCtype(t.next));
+        t.ctype.Tident = t.toPrettyChars(true);
     }
 
     override void visit(TypeStruct t)
@@ -172,7 +175,21 @@ public:
             {
                 foreach (v; sym.fields)
                 {
-                    symbol_struct_addField(cast(Symbol*)t.ctype.Ttag, v.ident.toChars(), Type_toCtype(v.type), v.offset);
+                    if (auto bf = v.isBitFieldDeclaration())
+                        symbol_struct_addBitField(cast(Symbol*)t.ctype.Ttag, v.ident.toChars(), Type_toCtype(v.type), v.offset, bf.fieldWidth, bf.bitOffset);
+                    else
+                        symbol_struct_addField(cast(Symbol*)t.ctype.Ttag, v.ident.toChars(), Type_toCtype(v.type), v.offset);
+                }
+            }
+            else
+            {
+                foreach (v; sym.fields)
+                {
+                    if (auto bf = v.isBitFieldDeclaration())
+                    {
+                        symbol_struct_hasBitFields(cast(Symbol*)t.ctype.Ttag);
+                        break;
+                    }
                 }
             }
 
@@ -206,7 +223,10 @@ public:
                 // https://issues.dlang.org/show_bug.cgi?id=13792
                 t.ctype = Type_toCtype(Type.tvoid);
             }
-            else if (sym.ident == Id.__c_long)
+            else if (sym.ident == Id.__c_long ||
+                     sym.ident == Id.__c_complex_float ||
+                     sym.ident == Id.__c_complex_double ||
+                     sym.ident == Id.__c_complex_real)
             {
                 t.ctype = type_fake(totym(t));
                 t.ctype.Tcount++;
@@ -259,6 +279,12 @@ public:
                 foreach (v; t.sym.fields)
                 {
                     symbol_struct_addField(cast(Symbol*)tc.Ttag, v.ident.toChars(), Type_toCtype(v.type), v.offset);
+                }
+                if (auto bc = t.sym.baseClass)
+                {
+                    auto ptr_to_basetype = Type_toCtype(bc.type);
+                    assert(ptr_to_basetype .Tty == TYnptr);
+                    symbol_struct_addBaseClass(cast(Symbol*)tc.Ttag, ptr_to_basetype.Tnext, 0);
                 }
             }
 

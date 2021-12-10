@@ -1,9 +1,17 @@
 /**
+ * Code generation 2
+ *
+ * Includes:
+ * - math operators (+ - * / %) and functions (abs, cos, sqrt)
+ * - 'string' functions (strlen, memcpy, memset)
+ * - pointers (address of / dereference)
+ * - struct assign, constructor, destructor
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1984-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cod2.d, backend/cod2.d)
@@ -42,6 +50,7 @@ import dmd.backend.xmm;
 extern (C++):
 
 nothrow:
+@safe:
 
 int REGSIZE();
 
@@ -76,6 +85,7 @@ private void swap(reg_t *a,reg_t *b)
  * Returns: true if cannot use this EA in anything other than a MOV instruction.
  */
 
+@trusted
 bool movOnly(const elem *e)
 {
     if (config.exe & EX_OSX64 && config.flags3 & CFG3pic && e.Eoper == OPvar)
@@ -133,6 +143,7 @@ regm_t idxregm(const code* c)
  * Gen code for call to floating point routine.
  */
 
+@trusted
 void opdouble(ref CodeBuilder cdb, elem *e,regm_t *pretregs,uint clib)
 {
     if (config.inline8087)
@@ -174,6 +185,7 @@ void opdouble(ref CodeBuilder cdb, elem *e,regm_t *pretregs,uint clib)
  * ( + - & | ^ )
  */
 
+@trusted
 void cdorth(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdorth(e = %p, *pretregs = %s)\n",e,regm_str(*pretregs));
@@ -529,7 +541,7 @@ void cdorth(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         }
     }
 
-    regm_t posregs = (isbyte) ? BYTEREGS : (mES | ALLREGS | mBP);
+    regm_t posregs = (isbyte) ? BYTEREGS : (mES | allregs);
     regm_t retregs = *pretregs & posregs;
     if (retregs == 0)                   /* if no return regs speced     */
                                         /* (like if wanted flags only)  */
@@ -592,13 +604,7 @@ void cdorth(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         debug
         if (_tysize[ty2] != REGSIZE)
         {
-            printf("e = %p, e.Eoper = ",e);
-            WROP(e.Eoper);
-            printf(" e1.Ety = ");
-            WRTYxx(ty1);
-            printf(" e2.Ety = ");
-            WRTYxx(ty2);
-            printf("\n");
+            printf("e = %p, e.Eoper = %s e1.Ety = %s e2.Ety = %s\n", e, oper_str(e.Eoper), tym_str(ty1), tym_str(ty2));
             elem_print(e);
         }
 
@@ -900,6 +906,7 @@ void cdorth(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Handle multiply.
  */
 
+@trusted
 void cdmul(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdmul()\n");
@@ -1287,6 +1294,7 @@ void cdmul(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Note that modulo isn't defined for doubles.
  */
 
+@trusted
 void cddiv(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cddiv()\n");
@@ -1996,6 +2004,7 @@ void cddiv(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  *      cnop:   nop
  */
 
+@trusted
 void cdnot(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdnot()\n");
@@ -2173,6 +2182,7 @@ void cdnot(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Complement operator
  */
 
+@trusted
 void cdcom(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     if (*pretregs == 0)
@@ -2218,6 +2228,7 @@ void cdcom(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Bswap operator
  */
 
+@trusted
 void cdbswap(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     if (*pretregs == 0)
@@ -2270,6 +2281,7 @@ void cdbswap(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * ?: operator
  */
 
+@trusted
 void cdcond(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     con_t regconold,regconsave;
@@ -2554,6 +2566,7 @@ void cdcond(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Comma operator OPcomma
  */
 
+@trusted
 void cdcomma(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs = 0;
@@ -2582,6 +2595,7 @@ void cdcomma(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  *      cnop2:  NOP                     ;mark end of code
  */
 
+@trusted
 void cdloglog(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     /* We can trip the assert with the following:
@@ -2591,6 +2605,7 @@ void cdloglog(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
      * assert(*pretregs != mPSW);
      */
 
+    //printf("cdloglog() *pretregs: %s\n", regm_str(*pretregs));
     cgstate.stackclean++;
     code *cnop1 = gennop(null);
     CodeBuilder cdb1;
@@ -2620,6 +2635,31 @@ void cdloglog(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         cgstate.stackclean--;
         return;
     }
+
+    if (tybasic(e2.Ety) == TYnoreturn)
+    {
+        regm_t retregs2 = 0;
+        codelem(cdb, e2, &retregs2, false);
+        regconsave.used |= regcon.used;
+        regcon = regconsave;
+        assert(stackpush == stackpushsave);
+
+        regm_t retregs = *pretregs & (ALLREGS | mBP);
+        if (!retregs)
+            retregs = ALLREGS;                                   // if mPSW only
+
+        reg_t reg;
+        allocreg(cdb1,&retregs,&reg,TYint);                     // allocate reg for result
+        movregconst(cdb1,reg,e.Eoper == OPoror,*pretregs & mPSW);
+        regcon.immed.mval &= ~mask(reg);                        // mark reg as unavail
+        *pretregs = retregs;
+
+        cdb.append(cnop3);
+        cdb.append(cdb1);        // eval code, throw away result
+        cgstate.stackclean--;
+        return;
+    }
+
     code *cnop2 = gennop(null);
     uint sz = tysize(e.Ety);
     if (tybasic(e2.Ety) == TYbool &&
@@ -2658,6 +2698,7 @@ void cdloglog(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         cgstate.stackclean--;
         return;
     }
+
     logexp(cdb,e2,1,FLcode,cnop1);
     andregcon(&regconsave);
 
@@ -2697,6 +2738,7 @@ void cdloglog(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for shift left or shift right (OPshl,OPshr,OPashr,OProl,OPror).
  */
 
+@trusted
 void cdshift(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     reg_t resreg;
@@ -3190,6 +3232,7 @@ version (SCPP)
  * Perform a 'star' reference (indirection).
  */
 
+@trusted
 void cdind(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs;
@@ -3313,7 +3356,7 @@ void cdind(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
         }
         else
         {
-            debug WRTYxx(tym);
+            debug printf("%s\n", tym_str(tym));
             assert(0);
         }
     }
@@ -3486,6 +3529,7 @@ void cdind(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * do nothing if e is a far pointer.
  */
 
+@trusted
 private code *cod2_setES(tym_t ty)
 {
     if (config.exe & EX_flat)
@@ -3527,6 +3571,7 @@ private code *cod2_setES(tym_t ty)
  * Generate code for intrinsic strlen().
  */
 
+@trusted
 void cdstrlen(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     /* Generate strlen in CX:
@@ -3575,6 +3620,7 @@ void cdstrlen(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for strcmp(s1,s2) intrinsic.
  */
 
+@trusted
 void cdstrcmp(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
 {
     char need_DS;
@@ -3682,6 +3728,7 @@ void cdstrcmp(ref CodeBuilder cdb, elem *e, regm_t *pretregs)
  * Generate code for memcmp(s1,s2,n) intrinsic.
  */
 
+@trusted
 void cdmemcmp(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     char need_DS;
@@ -3796,6 +3843,7 @@ void cdmemcmp(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * Generate code for strcpy(s1,s2) intrinsic.
  */
 
+@trusted
 void cdstrcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     char need_DS;
@@ -3908,6 +3956,7 @@ void cdstrcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  *      s2    n
  */
 
+@trusted
 void cdmemcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     char need_DS;
@@ -4031,6 +4080,7 @@ void cdmemcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
     }
     else
     {
+        getregs(cdb,mSI | mDI | mCX);
         code* cnop;
         if (zeroCheck)
         {
@@ -4041,7 +4091,6 @@ void cdmemcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
             genjmp(cdb, JE, FLcode, cast(block *)cnop);  // JZ cnop
         }
 
-        getregs(cdb,mSI | mDI | mCX);
         if (I16 && config.flags4 & CFG4speed)          // if speed optimization
         {
             // Note this doesn't work if CX is 0
@@ -4066,6 +4115,7 @@ void cdmemcpy(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  *      (s OPmemset (numbytes OPparam value))
  */
 
+@trusted
 void cdmemset(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     regm_t retregs1;
@@ -4338,6 +4388,7 @@ fixres:
  * Mebbe call cdstreq() for double assignments???
  */
 
+@trusted
 void cdstreq(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     char need_DS = false;
@@ -4515,6 +4566,7 @@ else
  * Is also called by cdstreq() to set up pointer to a structure.
  */
 
+@trusted
 void cdrelconst(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdrelconst(e = %p, *pretregs = %s)\n", e, regm_str(*pretregs));
@@ -4618,6 +4670,7 @@ void cdrelconst(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * reg.
  */
 
+@trusted
 void getoffset(ref CodeBuilder cdb,elem *e,reg_t reg)
 {
     //printf("getoffset(e = %p, reg = %d)\n", e, reg);
@@ -4865,6 +4918,7 @@ void getoffset(ref CodeBuilder cdb,elem *e,reg_t reg)
  * OPneg, OPsqrt, OPsin, OPcos, OPrint
  */
 
+@trusted
 void cdneg(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdneg()\n");
@@ -4949,6 +5003,7 @@ void cdneg(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  */
 
 
+@trusted
 void cdabs(ref CodeBuilder cdb,elem *e, regm_t *pretregs)
 {
     //printf("cdabs(e = %p, *pretregs = %s)\n", e, regm_str(*pretregs));
@@ -5069,6 +5124,7 @@ void cdabs(ref CodeBuilder cdb,elem *e, regm_t *pretregs)
  * Post increment and post decrement.
  */
 
+@trusted
 void cdpost(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     //printf("cdpost(pretregs = %s)\n", regm_str(*pretregs));
@@ -5483,6 +5539,7 @@ void cderr(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
     assert(0);
 }
 
+@trusted
 void cdinfo(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     switch (e.EV.E1.Eoper)
@@ -5542,6 +5599,7 @@ version (SCPP)
  * OPdctor
  */
 
+@trusted
 void cddctor(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     /* Generate:
@@ -5570,6 +5628,7 @@ void cddctor(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * OPddtor
  */
 
+@trusted
 void cdddtor(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     if (config.ehmethod == EHmethod.EH_DWARF)
@@ -5655,6 +5714,7 @@ void cdddtor(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
  * C++ constructor.
  */
 
+@trusted
 void cdctor(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
 version (SCPP)
@@ -5711,6 +5771,7 @@ void cdsetjmp(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 /*****************************************
  */
 
+@trusted
 void cdvoid(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(*pretregs == 0);
@@ -5720,6 +5781,7 @@ void cdvoid(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 /*****************************************
  */
 
+@trusted
 void cdhalt(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 {
     assert(*pretregs == 0);

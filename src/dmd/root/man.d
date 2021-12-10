@@ -1,7 +1,7 @@
 /**
  * Open an online manual page.
  *
- * Copyright: Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright: Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:   Walter Bright, http://www.digitalmars.com
  * License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:    $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/root/man.d, root/_man.d)
@@ -15,11 +15,12 @@ import core.stdc.stdio;
 import core.stdc.stdlib;
 import core.stdc.string;
 import core.sys.posix.unistd;
-import core.sys.windows.shellapi;
-import core.sys.windows.winuser;
 
 version (Windows)
 {
+    import core.sys.windows.shellapi;
+    import core.sys.windows.winuser;
+
     extern (C++) void browse(const(char)* url) nothrow @nogc
     in
     {

@@ -54,7 +54,10 @@ string stripDelimited(string str)
 
 const struct CompilationResult
 {
+    import dmd.dmodule : Module;
+
     Diagnostic[] diagnostics;
+    Module module_;
 
     alias diagnostics this;
 
@@ -101,7 +104,7 @@ CompilationResult compiles(string code, string filename = "test.d")
 
     t.module_.fullSemantic();
 
-    return CompilationResult(diagnosticCollector.diagnostics);
+    return CompilationResult(diagnosticCollector.diagnostics, t.module_);
 }
 
 class NoopDiagnosticReporter : DiagnosticReporter
@@ -131,7 +134,7 @@ const struct Diagnostic
 
     string toString() nothrow
     {
-        import dmd.root.outbuffer : OutBuffer;
+        import dmd.common.outbuffer : OutBuffer;
 
         auto buffer = OutBuffer();
         buffer.printf("%s: %.*s", location.toChars(true),
@@ -165,7 +168,7 @@ struct DiagnosticCollector
     {
         import std.array : replace;
         import std.string : strip;
-        import dmd.root.outbuffer : OutBuffer;
+        import dmd.common.outbuffer : OutBuffer;
 
         auto buffer = OutBuffer();
 

@@ -1,7 +1,7 @@
 /**
  * Convert to Intermediate Representation (IR) for the back-end.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/_tocsym.d, _toir.d)
@@ -17,7 +17,7 @@ import core.stdc.string;
 import core.stdc.stdlib;
 
 import dmd.root.array;
-import dmd.root.outbuffer;
+import dmd.common.outbuffer;
 import dmd.root.rmem;
 
 import dmd.backend.cdef;
@@ -27,11 +27,14 @@ import dmd.backend.el;
 import dmd.backend.global;
 import dmd.backend.oper;
 import dmd.backend.rtlsym;
+import dmd.backend.symtab : SYMIDX;
 import dmd.backend.ty;
 import dmd.backend.type;
 
 import dmd.aggregate;
 import dmd.arraytypes;
+import dmd.astenums;
+import dmd.attrib;
 import dmd.dclass;
 import dmd.declaration;
 import dmd.dmangle;
@@ -80,10 +83,12 @@ struct IRState
     Array!(elem*)* varsInScope;     // variables that are in scope that will need destruction later
     Label*[void*]* labels;          // table of labels used/declared in function
     const Param* params;            // command line parameters
+    const Target* target;           // target
     bool mayThrow;                  // the expression being evaluated may throw
+    bool Cfile;                     // use C semantics
 
     this(Module m, FuncDeclaration fd, Array!(elem*)* varsInScope, Dsymbols* deferToObj, Label*[void*]* labels,
-        const Param* params)
+        const Param* params, const Target* target)
     {
         this.m = m;
         this.symbol = fd;
@@ -91,6 +96,7 @@ struct IRState
         this.deferToObj = deferToObj;
         this.labels = labels;
         this.params = params;
+        this.target = target;
         mayThrow = global.params.useExceptions
             && ClassDeclaration.throwable
             && !(fd && fd.eh_none);
@@ -107,6 +113,8 @@ struct IRState
      */
     bool arrayBoundsCheck()
     {
+        if (m.isCFile)
+            return false;
         bool result;
         final switch (global.params.useArrayBounds)
         {
@@ -488,8 +496,9 @@ int intrinsic_op(FuncDeclaration fd)
         return op;
     //printf("intrinsic_op(%s)\n", name);
 
-    // Look for [core|std].module.function as id3.id2.id1 ...
     const Identifier id3 = fd.ident;
+
+    // Look for [core|std].module.function as id3.id2.id1 ...
     auto m = fd.getModule();
     if (!m || !m.md)
         return op;
@@ -509,9 +518,8 @@ int intrinsic_op(FuncDeclaration fd)
     // ... except std.math package and core.stdc.stdarg.va_start.
     if (md.packages.length == 2)
     {
-        if (id2 == Id.trig &&
-            md.packages[1] == Id.math &&
-            id1 == Id.std)
+        // Matches any module in std.math.*
+        if (md.packages[1] == Id.math && id1 == Id.std)
         {
             goto Lstdmath;
         }
@@ -584,7 +592,7 @@ int intrinsic_op(FuncDeclaration fd)
         }
     }
 
-    if (!global.params.is64bit)
+    if (!target.is64bit)
     // No 64-bit bsf bsr in 32bit mode
     {
         if ((op == OPbsf || op == OPbsr) && argtype1 is Type.tuns64)
@@ -593,7 +601,7 @@ int intrinsic_op(FuncDeclaration fd)
     return op;
 
 Lva_start:
-    if (global.params.is64bit &&
+    if (target.is64bit &&
         fd.toParent().isTemplateInstance() &&
         id3 == Id.va_start &&
         id2 == Id.stdarg &&
@@ -639,11 +647,12 @@ elem *resolveLengthVar(VarDeclaration lengthVar, elem **pe, Type t1)
         {
             elength = *pe;
             *pe = el_same(&elength);
-            elength = el_una(global.params.is64bit ? OP128_64 : OP64_32, TYsize_t, elength);
+            elength = el_una(target.is64bit ? OP128_64 : OP64_32, TYsize_t, elength);
 
         L3:
             slength = toSymbol(lengthVar);
-            //symbol_add(slength);
+            if (slength.Sclass == SCauto && slength.Ssymnum == SYMIDX.max)
+                symbol_add(slength);
 
             einit = el_bin(OPeq, TYsize_t, el_var(slength), elength);
         }
@@ -713,14 +722,14 @@ void setClosureVarOffset(FuncDeclaration fd)
              */
             memsize = target.ptrsize * 2;
             memalignsize = memsize;
-            xalign = STRUCTALIGN_DEFAULT;
+            xalign.setDefault();
         }
         else if (v.storage_class & (STC.out_ | STC.ref_))
         {
             // reference parameters are just pointers
             memsize = target.ptrsize;
             memalignsize = memsize;
-            xalign = STRUCTALIGN_DEFAULT;
+            xalign.setDefault();
         }
         else
         {
@@ -845,7 +854,7 @@ void buildClosure(FuncDeclaration fd, IRState *irs)
         typeof(Type.size()) lastsize;
         if (vlast.storage_class & STC.lazy_)
             lastsize = target.ptrsize * 2;
-        else if (vlast.isRef() || vlast.isOut())
+        else if (vlast.isReference)
             lastsize = target.ptrsize;
         else
             lastsize = vlast.type.size();
@@ -862,7 +871,7 @@ void buildClosure(FuncDeclaration fd, IRState *irs)
 
         // Allocate memory for the closure
         elem *e = el_long(TYsize_t, structsize);
-        e = el_bin(OPcall, TYnptr, el_var(getRtlsym(RTLSYM_ALLOCMEMORY)), e);
+        e = el_bin(OPcall, TYnptr, el_var(getRtlsym(RTLSYM.ALLOCMEMORY)), e);
         toTraceGC(irs, e, fd.loc);
 
         // Assign block of memory to sclosure
@@ -934,7 +943,7 @@ void buildCapture(FuncDeclaration fd)
 {
     if (!global.params.symdebug)
         return;
-    if (!global.params.mscoff)  // toDebugClosure only implemented for CodeView,
+    if (!target.mscoff)  // toDebugClosure only implemented for CodeView,
         return;                 //  but optlink crashes for negative field offsets
 
     if (fd.closureVars.dim && !fd.needsClosure)

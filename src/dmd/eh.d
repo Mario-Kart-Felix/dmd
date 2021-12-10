@@ -3,7 +3,7 @@
  * Generate exception handling tables.
  *
  * Copyright:   Copyright (C) 1994-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/eh.d, _eh.d)
@@ -19,6 +19,7 @@ import core.stdc.string;
 
 import dmd.globals;
 import dmd.errors;
+import dmd.target;
 
 import dmd.root.rmem;
 
@@ -113,7 +114,7 @@ void except_fillInEHTable(Symbol *s)
  */
     uint GUARD_SIZE;
     if (config.ehmethod == EHmethod.EH_DM)
-        GUARD_SIZE = (global.params.is64bit ? 3*8 : 5*4);
+        GUARD_SIZE = (target.is64bit ? 3*8 : 5*4);
     else if (config.ehmethod == EHmethod.EH_WIN32)
         GUARD_SIZE = 3*4;
     else

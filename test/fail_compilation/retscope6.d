@@ -170,3 +170,64 @@ T9 testfred()
     return fred(&i);   // error
 }
 
+/* TEST_OUTPUT:
+---
+fail_compilation/retscope6.d(10003): Error: scope variable `values` assigned to non-scope parameter `values` calling retscope6.escape
+---
+*/
+
+#line 10000
+
+void variadicCaller(int[] values...)
+{
+    escape(values);
+}
+
+void escape(int[] values) {}
+
+/* TEST_OUTPUT:
+---
+fail_compilation/retscope6.d(11004): Error: address of variable `buffer` assigned to `secret` with longer lifetime
+---
+*/
+
+#line 11000
+
+void hmac(scope ubyte[] secret)
+{
+    ubyte[10] buffer;
+    secret = buffer[];
+}
+
+/* TEST_OUTPUT:
+---
+fail_compilation/retscope6.d(12011): Error: reference to local variable `x` assigned to non-scope parameter `r` calling retscope6.escape_m_20150
+fail_compilation/retscope6.d(12022): Error: reference to local variable `x` assigned to non-scope parameter `r` calling retscope6.escape_c_20150
+---
+*/
+
+#line 12000
+
+// https://issues.dlang.org/show_bug.cgi?id=20150
+
+int* escape_m_20150(int* r) @safe pure
+{
+    return r;
+}
+
+int* f_m_20150() @safe
+{
+    int x = 42;
+    return escape_m_20150(&x);
+}
+
+const(int)* escape_c_20150(const int* r) @safe pure
+{
+    return r;
+}
+
+const(int)* f_c_20150() @safe
+{
+    int x = 42;
+    return escape_c_20150(&x);
+}

@@ -20,6 +20,7 @@ this license for that file.
 |--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [dmd/](https://github.com/dlang/dmd/tree/master/src/dmd)                 | The dmd driver and front-end                                                                                                                                                                                  |
 | [dmd/backend/](https://github.com/dlang/dmd/tree/master/src/dmd/backend) | Code generation for x86 or x86-64. Shared by the [Digital Mars C compiler](https://github.com/DigitalMars/Compiler/), but not [LDC](https://github.com/ldc-developers/ldc) or [GDC](https://gdcproject.org/). |
+| [dmd/common/](https://github.com/dlang/dmd/tree/master/src/dmd/common)   | Code shared by the front-end and back-end                                                                                                                                                                     |
 | [dmd/root/](https://github.com/dlang/dmd/tree/master/src/dmd/root)       | Meant as a portable utility library, but ["it wasn't very good and the only project left using it is dmd"](https://github.com/dlang/dmd/pull/9844#issuecomment-498479516).                                    |
 
 DMD has a mostly flat directory structure, so this section aims to divide all source files into logical groups for easier navigation.
@@ -44,10 +45,11 @@ Note that these groups have no strict meaning, the category assignments are a bi
 
 | File                                                                  | Purpose                                                              |
 |-----------------------------------------------------------------------|----------------------------------------------------------------------|
-| [lexer.d](https://github.com/dlang/dmd/blob/master/src/dmd/lexer.d)   | Convert source code into tokens for the parser                       |
+| [lexer.d](https://github.com/dlang/dmd/blob/master/src/dmd/lexer.d)   | Convert source code into tokens for the D and ImportC parsers        |
 | [entity.d](https://github.com/dlang/dmd/blob/master/src/dmd/entity.d) | Define "\\&Entity;" escape sequence for strings / character literals |
 | [tokens.d](https://github.com/dlang/dmd/blob/master/src/dmd/tokens.d) | Define lexical tokens.                                               |
-| [parse.d](https://github.com/dlang/dmd/blob/master/src/dmd/parse.d)   | Convert tokens into an Abstract Syntax Tree (AST)                    |
+| [parse.d](https://github.com/dlang/dmd/blob/master/src/dmd/parse.d)   | D parser, converting tokens into an Abstract Syntax Tree (AST)       |
+| [cparse.d](https://github.com/dlang/dmd/blob/master/src/dmd/cparse.d) | ImportC parser, converting tokens into an Abstract Syntax Tree (AST) |
 
 ### Semantic analysis
 
@@ -76,6 +78,7 @@ Note that these groups have no strict meaning, the category assignments are a bi
 | [ast_node.d](https://github.com/dlang/dmd/blob/master/src/dmd/ast_node.d)         | Define an abstract AST node class                           |
 | [astbase.d](https://github.com/dlang/dmd/blob/master/src/dmd/astbase.d)           | Namespace of AST nodes that can be produced by the parser   |
 | [astcodegen.d](https://github.com/dlang/dmd/blob/master/src/dmd/astcodegen.d)     | Namespace of AST nodes of a AST ready for code generation   |
+| [astenums.d](https://github.com/dlang/dmd/blob/master/src/dmd/astenums.d)         | Enums common to DMD and AST                                 |
 | [expression.d](https://github.com/dlang/dmd/blob/master/src/dmd/expression.d)     | Define expression AST nodes                                 |
 | [statement.d](https://github.com/dlang/dmd/blob/master/src/dmd/statement.d)       | Define statement AST nodes                                  |
 | [staticassert.d](https://github.com/dlang/dmd/blob/master/src/dmd/staticassert.d) | Define a `static assert` AST node                           |
@@ -124,6 +127,7 @@ Note that these groups have no strict meaning, the category assignments are a bi
 | [optimize.d](https://github.com/dlang/dmd/blob/master/src/dmd/optimize.d)     | Do constant folding more generally                                                         |
 | [dcast.d](https://github.com/dlang/dmd/blob/master/src/dmd/dcast.d)           | Implicit or explicit cast(), finding common types e.g. in `x ? a : b`, integral promotions |
 | [impcnvtab.d](https://github.com/dlang/dmd/blob/master/src/dmd/impcnvtab.d)   | Define an implicit conversion table for basic types                                        |
+| [importc.d](https://github.com/dlang/dmd/blob/master/src/dmd/importc.d)       | Helpers specific to ImportC                                                                |
 | [sideeffect.d](https://github.com/dlang/dmd/blob/master/src/dmd/sideeffect.d) | Extract side-effects of expressions for certain lowerings.                                 |
 
 **Compile Time Function Execution (CTFE)**
@@ -241,14 +245,14 @@ Note that these groups have no strict meaning, the category assignments are a bi
 
 Note: many other utilities are in [dmd/root](https://github.com/dlang/dmd/tree/master/src/dmd/root).
 
-| File                                                                        | Purpose                                           |
-|-----------------------------------------------------------------------------|---------------------------------------------------|
-| [env.d](https://github.com/dlang/dmd/blob/master/src/dmd/env.d)             | Modify environment variables                      |
-| [console.d](https://github.com/dlang/dmd/blob/master/src/dmd/console.d)     | Print error messages in color                     |
-| [utf.d](https://github.com/dlang/dmd/blob/master/src/dmd/utf.d)             | Encoding/decoding Unicode text                    |
-| [filecache.d](https://github.com/dlang/dmd/blob/master/src/dmd/filecache.d) | Keep file contents in memory                      |
-| [utils.d](https://github.com/dlang/dmd/blob/master/src/dmd/utils.d)         | Utility functions related to files and file paths |
-| [complex.d](https://github.com/dlang/dmd/blob/master/src/dmd/complex.d)     | A complex number type                             |
+| File                                                                              | Purpose                                           |
+|-----------------------------------------------------------------------------------|---------------------------------------------------|
+| [env.d](https://github.com/dlang/dmd/blob/master/src/dmd/env.d)                   | Modify environment variables                      |
+| [console.d](https://github.com/dlang/dmd/blob/master/src/dmd/console.d)           | Print error messages in color                     |
+| [utf.d](https://github.com/dlang/dmd/blob/master/src/dmd/utf.d)                   | Encoding/decoding Unicode text                    |
+| [file_manager.d](https://github.com/dlang/dmd/blob/master/src/dmd/file_manager.d) | Keep file contents in memory                      |
+| [utils.d](https://github.com/dlang/dmd/blob/master/src/dmd/utils.d)               | Utility functions related to files and file paths |
+| [complex.d](https://github.com/dlang/dmd/blob/master/src/dmd/complex.d)           | A complex number type                             |
 
 | File                                                                            | Purpose                                                       |
 |---------------------------------------------------------------------------------|---------------------------------------------------------------|

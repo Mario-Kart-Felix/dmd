@@ -1,9 +1,11 @@
 /**
+ * Define registers, register masks, and the CPU instruction linked list
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/code.d, backend/_code.d)
@@ -20,13 +22,15 @@ import dmd.backend.code_x86;
 import dmd.backend.codebuilder : CodeBuilder;
 import dmd.backend.el : elem;
 import dmd.backend.oper : OPMAX;
-import dmd.backend.outbuf;
 import dmd.backend.ty;
 import dmd.backend.type;
+
+import dmd.common.outbuffer;
 
 extern (C++):
 
 nothrow:
+@safe:
 
 alias segidx_t = int;           // index into SegData[]
 
@@ -90,6 +94,7 @@ code *code_next(code *c) { return c.next; }
 code *code_chunk_alloc();
 extern __gshared code *code_list;
 
+@trusted
 code *code_malloc()
 {
     //printf("code %d\n", sizeof(code));
@@ -113,6 +118,7 @@ struct REGSAVE
     int alignment;              // 8 or 16
 
   nothrow:
+    @trusted
     void reset() { off = 0; top = 0; idx = 0; alignment = _tysize[TYnptr]/*REGSIZE*/; }
     void save(ref CodeBuilder cdb, reg_t reg, uint *pidx) { REGSAVE_save(this, cdb, reg, *pidx); }
     void restore(ref CodeBuilder cdb, reg_t reg, uint idx) { REGSAVE_restore(this, cdb, reg, idx); }
@@ -248,14 +254,12 @@ struct seg_data
 
     //ELFOBJ || MACHOBJ
     IDXSEC           SDshtidx;          // section header table index
-    Outbuffer       *SDbuf;             // buffer to hold data
-    Outbuffer       *SDrel;             // buffer to hold relocation info
+    OutBuffer       *SDbuf;             // buffer to hold data
+    OutBuffer       *SDrel;             // buffer to hold relocation info
 
     //ELFOBJ
     IDXSYM           SDsymidx;          // each section is in the symbol table
     IDXSEC           SDrelidx;          // section header for relocation info
-    targ_size_t      SDrelmaxoff;       // maximum offset encountered
-    int              SDrelindex;        // maximum offset encountered
     int              SDrelcnt;          // number of relocations added
     IDXSEC           SDshtidxout;       // final section header table index
     Symbol          *SDsym;             // if !=NULL, comdat symbol
@@ -266,6 +270,7 @@ struct seg_data
     Barray!(linnum_data) SDlinnum_data;     // array of line number / offset data
 
   nothrow:
+    @trusted
     int isCode() { return config.objfmt == OBJ_MACH ? mach_seg_data_isCode(this) : mscoff_seg_data_isCode(this); }
 }
 
@@ -288,8 +293,13 @@ struct LinOff
 
 extern __gshared Rarray!(seg_data*) SegData;
 
+@trusted
 ref targ_size_t Offset(int seg) { return SegData[seg].SDoffset; }
+
+@trusted
 ref targ_size_t Doffset() { return Offset(DATA); }
+
+@trusted
 ref targ_size_t CDoffset() { return Offset(CDATA); }
 
 /**************************************************/
@@ -300,8 +310,10 @@ ref targ_size_t CDoffset() { return Offset(CDATA); }
 struct FuncParamRegs
 {
     //this(tym_t tyf);
+    @trusted
     static FuncParamRegs create(tym_t tyf) { return FuncParamRegs_create(tyf); }
 
+    @trusted
     int alloc(type *t, tym_t ty, ubyte *reg1, ubyte *reg2)
     { return FuncParamRegs_alloc(this, t, ty, reg1, reg2); }
 
@@ -371,6 +383,7 @@ void codgen(Symbol *);
 debug
 {
     reg_t findreg(regm_t regm , int line, const(char)* file);
+    @trusted
     extern (D) reg_t findreg(regm_t regm , int line = __LINE__, string file = __FILE__)
     { return findreg(regm, line, file.ptr); }
 }
@@ -399,7 +412,6 @@ regm_t getscratch();
 void codelem(ref CodeBuilder cdb, elem *e, regm_t *pretregs, uint constflag);
 void scodelem(ref CodeBuilder cdb, elem *e, regm_t *pretregs, regm_t keepmsk, bool constflag);
 const(char)* regm_str(regm_t rm);
-int numbitsset(regm_t);
 
 /* cdxxx.c: functions that go into cdxxx[] table */
 void cdabs(ref CodeBuilder cdb, elem* e, regm_t* pretregs);
@@ -509,7 +521,7 @@ void cod3_set32();
 void cod3_set64();
 void cod3_align_bytes(int seg, size_t nbytes);
 void cod3_align(int seg);
-void cod3_buildmodulector(Outbuffer* buf, int codeOffset, int refOffset);
+void cod3_buildmodulector(OutBuffer* buf, int codeOffset, int refOffset);
 void cod3_stackadj(ref CodeBuilder cdb, int nbytes);
 void cod3_stackalign(ref CodeBuilder cdb, int nbytes);
 regm_t regmask(tym_t tym, tym_t tyf);
@@ -558,7 +570,7 @@ void searchfixlist(Symbol *s) {}
 void outfixlist();
 void code_hydrate(code **pc);
 void code_dehydrate(code **pc);
-regm_t allocretregs(tym_t ty, type *t, tym_t tyf, reg_t *reg1, reg_t *reg2);
+regm_t allocretregs(const tym_t ty, type* t, const tym_t tyf, out reg_t reg1, out reg_t reg2);
 
 extern __gshared
 {
@@ -630,8 +642,8 @@ void gensaverestore87(regm_t, ref CodeBuilder cdbsave, ref CodeBuilder cdbrestor
 //code *genfltreg(code *c,opcode_t opcode,uint reg,targ_size_t offset);
 void genfwait(ref CodeBuilder cdb);
 void comsub87(ref CodeBuilder cdb, elem *e, regm_t *pretregs);
-void fixresult87(ref CodeBuilder cdb, elem *e, regm_t retregs, regm_t *pretregs);
-void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs);
+void fixresult87(ref CodeBuilder cdb, elem *e, regm_t retregs, regm_t *pretregs, bool isReturnValue = false);
+void fixresult_complex87(ref CodeBuilder cdb,elem *e,regm_t retregs,regm_t *pretregs, bool isReturnValue = false);
 void orth87(ref CodeBuilder cdb, elem *e, regm_t *pretregs);
 void load87(ref CodeBuilder cdb, elem *e, uint eoffset, regm_t *pretregs, elem *eleft, int op);
 int cmporder87 (elem *e );
@@ -659,7 +671,7 @@ regm_t iasm_regs(block *bp);
  * NOTE: For 16 bit generator, this is always a (targ_short) sign-extended
  *      value.
  */
-
+@trusted
 void regimmed_set(int reg, targ_size_t e)
 {
     regcon.immed.value[reg] = e;

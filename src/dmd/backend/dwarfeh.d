@@ -1,9 +1,8 @@
 /**
- * Compiler implementation of the D programming language.
  * Implements LSDA (Language Specific Data Area) table generation
  * for Dwarf Exception Handling.
  *
- * Copyright: Copyright (C) 2015-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright: Copyright (C) 2015-2021 by The D Language Foundation, All Rights Reserved
  * Authors: Walter Bright, http://www.digitalmars.com
  * License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:    $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/dwarfeh.d, backend/dwarfeh.d)
@@ -19,10 +18,11 @@ import dmd.backend.cc;
 import dmd.backend.cdef;
 import dmd.backend.code;
 import dmd.backend.code_x86;
-import dmd.backend.outbuf;
 
 import dmd.backend.dwarf;
 import dmd.backend.dwarf2;
+
+import dmd.common.outbuffer;
 
 extern (C++):
 
@@ -79,7 +79,7 @@ private __gshared DwEhTable dwehtable;
  *      retoffset = offset from start of function to epilog
  */
 
-void genDwarfEh(Funcsym *sfunc, int seg, Outbuffer *et, bool scancode, uint startoffset, uint retoffset)
+void genDwarfEh(Funcsym *sfunc, int seg, OutBuffer *et, bool scancode, uint startoffset, uint retoffset)
 {
     debug
     unittest_dwarfeh();
@@ -118,8 +118,8 @@ static if (0)
 
     DwEhTable *deh = &dwehtable;
     deh.dim = 0;
-    Outbuffer atbuf;
-    Outbuffer cstbuf;
+    OutBuffer atbuf;
+    OutBuffer cstbuf;
 
     /* Build deh table, and Action Table
      */
@@ -221,7 +221,7 @@ static if (1)
         {
                 void WRITE(uint v)
                 {
-                    if (ELFOBJ)
+                    if (config.objfmt == OBJ_ELF)
                         cstbuf.writeuLEB128(v);
                     else
                         cstbuf.write32(v);
@@ -270,22 +270,25 @@ else
                 }
                 if (start < dend)
                 {
-static if (ELFOBJ)
-                    auto WRITE = &cstbuf.writeLEB128;
-else static if (MACHOBJ)
-                    auto WRITE = &cstbuf.write32;
-else
-                    assert(0);
+                    void writeCallSite(void delegate(uint) WRITE)
+                    {
+                        uint CallSiteStart = start - startblock.Boffset;
+                        WRITE(CallSiteStart);
+                        uint CallSiteRange = dend - start;
+                        WRITE(CallSiteRange);
+                        uint LandingPad = d.lpad - startblock.Boffset;
+                        cstbuf.WRITE(LandingPad);
+                        uint ActionTable = d.action;
+                        WRITE(ActionTable);
+                        //printf("\t%x %x %x %x\n", CallSiteStart, CallSiteRange, LandingPad, ActionTable);
+                    }
 
-                    uint CallSiteStart = start - startblock.Boffset;
-                    WRITE(CallSiteStart);
-                    uint CallSiteRange = dend - start;
-                    WRITE(CallSiteRange);
-                    uint LandingPad = d.lpad - startblock.Boffset;
-                    cstbuf.WRITE(LandingPad);
-                    uint ActionTable = d.action;
-                    WRITE(ActionTable);
-                    //printf("\t%x %x %x %x\n", CallSiteStart, CallSiteRange, LandingPad, ActionTable);
+                    if (config.objfmt == OBJ_ELF)
+                        writeCallSite((uint a) => cstbuf.writeLEB128(a));
+                    else if (config.objfmt == OBJ_MACH)
+                        writeCallSite((uint a) => cstbuf.write32(a));
+                    else
+                        assert(0);
                 }
 
                 end = dend;
@@ -336,12 +339,11 @@ else
         et.writeuLEB128(TTbase);
     uint TToffset = cast(uint)(TTbase + et.length() - startsize);
 
-static if (ELFOBJ)
-    const ubyte CallSiteFormat = DW_EH_PE_absptr | DW_EH_PE_uleb128;
-else static if (MACHOBJ)
-    const ubyte CallSiteFormat = DW_EH_PE_absptr | DW_EH_PE_udata4;
-else
-    const ubyte CallSiteFormat = 0;
+    ubyte CallSiteFormat = 0;
+    if (config.objfmt == OBJ_ELF)
+        CallSiteFormat = DW_EH_PE_absptr | DW_EH_PE_uleb128;
+    else if (config.objfmt == OBJ_MACH)
+        CallSiteFormat = DW_EH_PE_absptr | DW_EH_PE_udata4;
 
     et.writeByte(CallSiteFormat);
     et.writeuLEB128(CallSiteTableSize);
@@ -366,13 +368,11 @@ else
          *         32: [0] address x004c pcrel 0 length 2 value x224 type 4 RELOC_LOCAL_SECTDIFF
          *             [1] address x0000 pcrel 0 length 2 value x160 type 1 RELOC_PAIR
          */
-        static if (ELFOBJ || MACHOBJ)
-        {
-            if (config.objfmt == OBJ_ELF)
-                elf_dwarf_reftoident(seg, et.length(), s, 0);
-            else
-                mach_dwarf_reftoident(seg, et.length(), s, 0);
-        }
+
+        if (config.objfmt == OBJ_ELF)
+            elf_dwarf_reftoident(seg, et.length(), s, 0);
+        else if (config.objfmt == OBJ_MACH)
+            mach_dwarf_reftoident(seg, et.length(), s, 0);
     }
     assert(TToffset == et.length() - startsize);
 }
@@ -388,10 +388,10 @@ else
  * Returns:
  *      offset of inserted action
  */
-int actionTableInsert(Outbuffer *atbuf, int ttindex, int nextoffset)
+int actionTableInsert(OutBuffer *atbuf, int ttindex, int nextoffset)
 {
     //printf("actionTableInsert(%d, %d)\n", ttindex, nextoffset);
-    const(ubyte)[] p = (*atbuf)[];
+    auto p = cast(const(ubyte)[]) (*atbuf)[];
     while (p.length)
     {
         int offset = cast(int) (atbuf.length - p.length);
@@ -416,7 +416,7 @@ int actionTableInsert(Outbuffer *atbuf, int ttindex, int nextoffset)
 debug
 void unittest_actionTableInsert()
 {
-    Outbuffer atbuf;
+    OutBuffer atbuf;
     static immutable int[3] tt1 = [ 1,2,3 ];
     static immutable int[1] tt2 = [ 2 ];
 
@@ -550,7 +550,7 @@ uint uLEB128size(uint value)
 debug
 void unittest_LEB128()
 {
-    Outbuffer buf;
+    OutBuffer buf;
 
     static immutable int[16] values =
     [
@@ -565,7 +565,7 @@ void unittest_LEB128()
         buf.reset();
         buf.writeuLEB128(value);
         assert(buf.length() == uLEB128size(value));
-        const(ubyte)[] p = buf[];
+        auto p = cast(const(ubyte)[]) buf[];
         int result = uLEB128(p);
         assert(!p.length);
         assert(result == value);
@@ -573,7 +573,7 @@ void unittest_LEB128()
         buf.reset();
         buf.writesLEB128(value);
         assert(buf.length() == sLEB128size(value));
-        p = buf[];
+        p = cast(const(ubyte)[]) buf[];
         result = sLEB128(p);
         assert(!p.length);
         assert(result == value);

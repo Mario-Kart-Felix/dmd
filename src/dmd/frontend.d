@@ -1,7 +1,7 @@
 /**
  * Contains high-level interfaces for interacting with DMD as a library.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/id.d, _id.d)
@@ -116,14 +116,13 @@ void initDMD(
     import dmd.cond : VersionCondition;
     import dmd.dmodule : Module;
     import dmd.expression : Expression;
-    import dmd.filecache : FileCache;
     import dmd.globals : CHECKENABLE, global;
     import dmd.id : Id;
     import dmd.identifier : Identifier;
-    import dmd.mars : setTarget, addDefaultVersionIdentifiers;
+    import dmd.mars : addDefaultVersionIdentifiers;
     import dmd.mtype : Type;
     import dmd.objc : Objc;
-    import dmd.target : target;
+    import dmd.target : target, defaultTargetOS;
 
     diagnosticHandler = handler;
 
@@ -140,16 +139,16 @@ void initDMD(
     }
 
     versionIdentifiers.each!(VersionCondition.addGlobalIdent);
-    setTarget(global.params);
-    addDefaultVersionIdentifiers(global.params);
 
+    target.os = defaultTargetOS();
+    target._init(global.params);
     Type._init();
     Id.initialize();
     Module._init();
-    target._init(global.params);
     Expression._init();
     Objc._init();
-    FileCache._init();
+
+    addDefaultVersionIdentifiers(global.params, target);
 
     version (CRuntime_Microsoft)
         initFPU();
@@ -400,7 +399,12 @@ Tuple!(Module, "module_", Diagnostics, "diagnostics") parseModule(AST = ASTCodeg
             buffer: FileBuffer(cast(ubyte[]) code.dup ~ '\0')
         };
 
-        m.loadSourceBuffer(Loc.initial, readResult);
+        if (m.loadSourceBuffer(Loc.initial, readResult))
+        {
+            import dmd.file_manager : FileManager;
+            import dmd.root.filename : FileName;
+            FileManager.fileManager.add(FileName(fileName), m.srcBuffer);
+        }
     }
 
     m.parseModule!AST();
@@ -444,10 +448,11 @@ Returns:
 */
 string prettyPrint(Module m)
 {
-    import dmd.root.outbuffer: OutBuffer;
+    import dmd.common.outbuffer: OutBuffer;
     import dmd.hdrgen : HdrGenState, moduleToBuffer2;
 
-    OutBuffer buf = { doindent: 1 };
+    auto buf = OutBuffer();
+    buf.doindent = 1;
     HdrGenState hgs = { fullDump: 1 };
     moduleToBuffer2(m, &buf, &hgs);
 

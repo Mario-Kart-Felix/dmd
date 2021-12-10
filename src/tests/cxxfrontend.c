@@ -9,16 +9,18 @@
  */
 
 #include "root/array.h"
+#include "root/bitarray.h"
 #include "root/ctfloat.h"
 #include "root/dcompat.h"
+#include "root/dsystem.h"
 #include "root/file.h"
 #include "root/filename.h"
 #include "root/longdouble.h"
 #include "root/object.h"
-#include "root/outbuffer.h"
+#include "root/optional.h"
+#include "common/outbuffer.h"
 #include "root/port.h"
 #include "root/rmem.h"
-#include "root/root.h"
 
 #include "aggregate.h"
 #include "aliasthis.h"
@@ -67,17 +69,19 @@ static void frontend_init()
     gc_disable();
 
     global._init();
-    global.params.targetOS = TargetOS_linux;
     global.vendor = "Front-End Tester";
     global.params.objname = NULL;
-    global.params.cpu = CPU::native;
+
+    target.os = Target::OS_linux;
+    target.is64bit = true;
+    target.cpu = CPU::native;
+    target._init(global.params);
 
     Type::_init();
     Id::initialize();
     Module::_init();
     Expression::_init();
     Objc::_init();
-    target._init(global.params);
     CTFloat::initialize();
 }
 
@@ -97,12 +101,12 @@ static void frontend_term()
 void test_tokens()
 {
     // First valid TOK value
-    assert(TOKlparen == 1);
-    assert(strcmp(Token::toChars(TOKlparen), "(") == 0);
+    assert((unsigned)TOK::leftParenthesis == 1);
+    assert(strcmp(Token::toChars(TOK::leftParenthesis), "(") == 0);
 
     // Last valid TOK value
-    assert(TOKvectorarray == TOKMAX - 1);
-    assert(strcmp(Token::toChars(TOKvectorarray), "vectorarray") == 0);
+    assert((unsigned)TOK::attribute__ == (unsigned)TOK::MAX - 1);
+    assert(strcmp(Token::toChars(TOK::vectorArray), "vectorarray") == 0);
 }
 
 void test_compiler_globals()
@@ -220,7 +224,7 @@ void test_visitors()
     tp->accept(&tv);
     assert(tv.type == true);
 
-    LinkDeclaration *ld = LinkDeclaration::create(LINK::d, NULL);
+    LinkDeclaration *ld = LinkDeclaration::create(loc, LINK::d, NULL);
     assert(ld->isAttribDeclaration() == static_cast<AttribDeclaration *>(ld));
     assert(ld->linkage == LINK::d);
     ld->accept(&tv);
@@ -298,6 +302,32 @@ void test_semantic()
 
 /**********************************/
 
+void test_skip_importall()
+{
+    /* Similar to test_semantic(), but importAll step is skipped.  */
+    const char *buf =
+        "module rootobject;\n"
+        "class RootObject : Object { }";
+
+    FileBuffer *srcBuffer = FileBuffer::create(); // free'd in Module::parse()
+    srcBuffer->data = DArray<unsigned char>(strlen(buf), (unsigned char *)mem.xstrdup(buf));
+
+    Module *m = Module::create("rootobject.d", Identifier::idPool("rootobject"), 0, 0);
+
+    unsigned errors = global.startGagging();
+
+    m->srcBuffer = srcBuffer;
+    m->parse();
+    m->importedFrom = m;
+    dsymbolSemantic(m, NULL);
+    semantic2(m, NULL);
+    semantic3(m, NULL);
+
+    assert(!global.endGagging(errors));
+}
+
+/**********************************/
+
 void test_expression()
 {
     Loc loc;
@@ -306,13 +336,16 @@ void test_expression()
 
     assert(e);
     assert(e->isConst());
+
+    Optional<bool> res = e->toBool();
+    assert(res.get());
 }
 
 /**********************************/
 
 void test_target()
 {
-    assert(target.isVectorOpSupported(Type::tint32, TOKpow));
+    assert(target.isVectorOpSupported(Type::tint32, EXP::pow));
 }
 
 /**********************************/
@@ -324,17 +357,17 @@ void test_emplace()
 
     IntegerExp::emplace(&ue, loc, 1065353216, Type::tint32);
     Expression *e = ue.exp();
-    assert(e->op == TOKint64);
+    assert(e->op == EXP::int64);
     assert(e->toInteger() == 1065353216);
 
     UnionExp ure;
     Expression *re = Compiler::paintAsType(&ure, e, Type::tfloat32);
-    assert(re->op == TOKfloat64);
+    assert(re->op == EXP::float64);
     assert(re->toReal() == CTFloat::one);
 
     UnionExp uie;
     Expression *ie = Compiler::paintAsType(&uie, re, Type::tint32);
-    assert(ie->op == TOKint64);
+    assert(ie->op == EXP::int64);
     assert(ie->toInteger() == e->toInteger());
 }
 
@@ -499,14 +532,31 @@ void test_cppmangle()
     fd = (*cd->members)[0]->isFuncDeclaration();
     assert(fd);
     mangle = cppThunkMangleItanium(fd, b->offset);
-    assert(strcmp(mangle, "_ZThn4_N7Derived9MethodCPPEv") == 0);
+    assert(strcmp(mangle, "_ZThn8_N7Derived9MethodCPPEv") == 0);
 
     fd = (*cd->members)[1]->isFuncDeclaration();
     assert(fd);
     mangle = cppThunkMangleItanium(fd, b->offset);
-    assert(strcmp(mangle, "_ZThn4_N7Derived7MethodDEv") == 0);
+    assert(strcmp(mangle, "_ZThn8_N7Derived7MethodDEv") == 0);
 
     assert(!global.endGagging(errors));
+}
+
+void test_module()
+{
+    unsigned errors = global.startGagging();
+    Module *mod = Module::load(Loc(), NULL, Identifier::idPool("doesnotexist.d"));
+    assert(mod == NULL);
+    assert(global.endGagging(errors));
+}
+
+void test_optional()
+{
+    Optional<bool> opt = Optional<bool>::create(true);
+    assert(!opt.isEmpty());
+    assert(opt.isPresent());
+    assert(opt.get() == true);
+    assert(opt.hasValue(true));
 }
 
 /**********************************/
@@ -519,6 +569,7 @@ int main(int argc, char **argv)
     test_compiler_globals();
     test_visitors();
     test_semantic();
+    test_skip_importall();
     test_expression();
     test_target();
     test_emplace();
@@ -528,6 +579,8 @@ int main(int argc, char **argv)
     test_array();
     test_outbuffer();
     test_cppmangle();
+    test_module();
+    test_optional();
 
     frontend_term();
 

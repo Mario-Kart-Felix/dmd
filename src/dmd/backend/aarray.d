@@ -1,8 +1,10 @@
 /**
+ * Associative Array implementation
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
- * Copyright:   Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright), Dave Fladebo
  * License:     Distributed under the Boost Software License, Version 1.0.
  *              http://www.boost.org/LICENSE_1_0.txt
@@ -21,6 +23,7 @@ version (MARS)
     import dmd.root.hash;
 
 nothrow:
+@safe:
 
 /*********************
  * This is the "bucket" used by the AArray.
@@ -53,6 +56,7 @@ nothrow:
     /****
      * Frees all the data used by AArray
      */
+    @trusted
     void destroy()
     {
         if (buckets)
@@ -89,7 +93,7 @@ nothrow:
      * Returns:
      *  pointer to Value
      */
-
+    @trusted
     Value* get(Key* pkey)
     {
         //printf("AArray::get()\n");
@@ -150,6 +154,7 @@ nothrow:
      *  !=null  in aa, return pointer to value
      */
 
+    @trusted
     Value* isIn(Key* pkey)
     {
         //printf("AArray.isIn(), .length = %d, .ptr = %p\n", nodes, buckets.ptr);
@@ -183,6 +188,7 @@ nothrow:
      *  pKey = pointer to key
      */
 
+    @trusted
     void del(Key *pkey)
     {
         if (!nodes)
@@ -214,6 +220,7 @@ nothrow:
      *  malloc'd array of keys
      */
 
+    @trusted
     Key[] keys()
     {
         if (!nodes)
@@ -240,6 +247,7 @@ nothrow:
      *  malloc'd array of values
      */
 
+    @trusted
     Value[] values()
     {
         if (!nodes)
@@ -265,6 +273,7 @@ nothrow:
      * Rehash an array.
      */
 
+    @trusted
     void rehash()
     {
         //printf("Rehash\n");
@@ -313,6 +322,7 @@ nothrow:
      *  0   : no entries in aa, or all dg() calls returned 0
      */
 
+    @trusted
     int apply(applyDg dg)
     {
         if (!nodes)
@@ -326,7 +336,7 @@ nothrow:
         {
             while (e)
             {
-                auto result = dg(cast(Key*)(e + 1), cast(Value*)(e + 1) + aligned_keysize);
+                auto result = dg(cast(Key*)(e + 1), cast(Value*)(cast(void*)(e + 1) + aligned_keysize));
                 if (result)
                     return result;
                 e = e.next;
@@ -421,6 +431,7 @@ nothrow:
         }
     }
 
+    @trusted
     static bool equals(Key* pk1, Key* pk2)
     {
         auto buf1 = *pk1;
@@ -437,6 +448,7 @@ nothrow:
     alias AA = AArray!(TinfoChars, uint);
     AA aa;
 
+    @trusted
     static AAchars* create()
     {
         auto a = cast(AAchars*)calloc(1, AAchars.sizeof);
@@ -444,12 +456,14 @@ nothrow:
         return a;
     }
 
+    @trusted
     static void destroy(AAchars* aac)
     {
         aac.aa.destroy();
         free(aac);
     }
 
+    @trusted
     extern(D) uint* get(const(char)[] buf)
     {
         return aa.get(&buf);
@@ -474,6 +488,7 @@ nothrow:
 
     ubyte** pbase;
 
+    @trusted
     hash_t getHash(Key* pk)
     {
         version (MARS)
@@ -491,6 +506,7 @@ nothrow:
         }
     }
 
+    @trusted
     bool equals(Key* pk1, Key* pk2)
     {
         const len1 = pk1.end - pk1.start;
@@ -510,6 +526,7 @@ nothrow:
     alias AA = AArray!(TinfoPair, uint);
     AA aa;
 
+    @trusted
     static AApair* create(ubyte** pbase)
     {
         auto a = cast(AApair*)calloc(1, AApair.sizeof);
@@ -518,12 +535,14 @@ nothrow:
         return a;
     }
 
+    @trusted
     static void destroy(AApair* aap)
     {
         aap.aa.destroy();
         free(aap);
     }
 
+    @trusted
     uint* get(uint start, uint end)
     {
         auto p = Pair(start, end);
@@ -543,6 +562,7 @@ nothrow:
     alias AA = AArray!(TinfoPair, Pair);
     AA aa;
 
+    @trusted
     static AApair2* create(ubyte** pbase)
     {
         auto a = cast(AApair2*)calloc(1, AApair2.sizeof);
@@ -551,12 +571,14 @@ nothrow:
         return a;
     }
 
+    @trusted
     static void destroy(AApair2* aap)
     {
         aap.aa.destroy();
         free(aap);
     }
 
+    @trusted
     Pair* get(uint start, uint end)
     {
         auto p = Pair(start, end);
@@ -571,23 +593,7 @@ nothrow:
 
 /*************************************************************/
 
-version (none)
-{
-
-/* Since -betterC doesn't support unittests, do it this way
- * for the time being.
- * This is a stand-alone file anyway.
- */
-
-int main()
-{
-    testAArray();
-    testAApair();
-
-    return 0;
-}
-
-void testAArray()
+@system unittest
 {
     int dg(int* pk, bool* pv) { return 3; }
     int dgz(int* pk, bool* pv) { return 0; }
@@ -629,9 +635,17 @@ void testAArray()
     auto values = aa.values();
     assert(values.length == 1);
     assert(values[0] == false);
+
+    AArray!(Tinfo!int, bool) aa2;
+    int key = 10;
+    bool* getpv = aa2.get(&key);
+    aa2.apply(delegate(int* pk, bool* pv) @trusted {
+        assert(pv is getpv);
+        return 0;
+    });
 }
 
-void testAApair()
+@system unittest
 {
     const(char)* buf = "abcb";
     auto aap = AApair.create(cast(ubyte**)&buf);
@@ -641,6 +655,4 @@ void testAApair()
     pu = aap.get(3,4);
     assert(*pu == 10);
     AApair.destroy(aap);
-}
-
 }

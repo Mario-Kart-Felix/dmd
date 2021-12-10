@@ -1,5 +1,7 @@
 
 /**
+ * Declarations for ELF file format
+ *
  * Compiler implementation of the
  * $(LINK2 http://www.dlang.org, D programming language).
  *
@@ -22,6 +24,7 @@ alias elf_u8_f32  = uint;
 enum EI_NIDENT = 16;
 
 nothrow:
+@safe:
 
 // EHident
         enum EI_MAG0         = 0;       /* Identification byte offset 0*/

@@ -1,7 +1,7 @@
 /**
  * Find side-effects of expressions.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/sideeffect.d, _sideeffect.d)
@@ -12,6 +12,7 @@
 module dmd.sideeffect;
 
 import dmd.apply;
+import dmd.astenums;
 import dmd.declaration;
 import dmd.dscope;
 import dmd.expression;
@@ -46,7 +47,7 @@ extern (C++) bool isTrivialExp(Expression e)
              * CallExp is always non trivial expression,
              * especially for inlining.
              */
-            if (e.op == TOK.call)
+            if (e.op == EXP.call)
             {
                 stop = true;
                 return;
@@ -62,8 +63,13 @@ extern (C++) bool isTrivialExp(Expression e)
 
 /********************************************
  * Determine if Expression has any side effects.
+ *
+ * Params:
+ *   e = the expression
+ *   assumeImpureCalls = whether function calls should always be assumed to
+ *                       be impure (e.g. debug is allowed to violate purity)
  */
-extern (C++) bool hasSideEffect(Expression e)
+extern (C++) bool hasSideEffect(Expression e, bool assumeImpureCalls = false)
 {
     extern (C++) final class LambdaHasSideEffect : StoppableVisitor
     {
@@ -76,7 +82,7 @@ extern (C++) bool hasSideEffect(Expression e)
         override void visit(Expression e)
         {
             // stop walking if we determine this expression has side effects
-            stop = lambdaHasSideEffect(e);
+            stop = lambdaHasSideEffect(e, assumeImpureCalls);
         }
     }
 
@@ -142,42 +148,48 @@ int callSideEffectLevel(Type t)
     return 0;
 }
 
-private bool lambdaHasSideEffect(Expression e)
+private bool lambdaHasSideEffect(Expression e, bool assumeImpureCalls = false)
 {
     switch (e.op)
     {
     // Sort the cases by most frequently used first
-    case TOK.assign:
-    case TOK.plusPlus:
-    case TOK.minusMinus:
-    case TOK.declaration:
-    case TOK.construct:
-    case TOK.blit:
-    case TOK.addAssign:
-    case TOK.minAssign:
-    case TOK.concatenateAssign:
-    case TOK.concatenateElemAssign:
-    case TOK.concatenateDcharAssign:
-    case TOK.mulAssign:
-    case TOK.divAssign:
-    case TOK.modAssign:
-    case TOK.leftShiftAssign:
-    case TOK.rightShiftAssign:
-    case TOK.unsignedRightShiftAssign:
-    case TOK.andAssign:
-    case TOK.orAssign:
-    case TOK.xorAssign:
-    case TOK.powAssign:
-    case TOK.in_:
-    case TOK.remove:
-    case TOK.assert_:
-    case TOK.halt:
-    case TOK.delete_:
-    case TOK.new_:
-    case TOK.newAnonymousClass:
+    case EXP.assign:
+    case EXP.plusPlus:
+    case EXP.minusMinus:
+    case EXP.declaration:
+    case EXP.construct:
+    case EXP.blit:
+    case EXP.addAssign:
+    case EXP.minAssign:
+    case EXP.concatenateAssign:
+    case EXP.concatenateElemAssign:
+    case EXP.concatenateDcharAssign:
+    case EXP.mulAssign:
+    case EXP.divAssign:
+    case EXP.modAssign:
+    case EXP.leftShiftAssign:
+    case EXP.rightShiftAssign:
+    case EXP.unsignedRightShiftAssign:
+    case EXP.andAssign:
+    case EXP.orAssign:
+    case EXP.xorAssign:
+    case EXP.powAssign:
+    case EXP.in_:
+    case EXP.remove:
+    case EXP.assert_:
+    case EXP.halt:
+    case EXP.delete_:
+    case EXP.new_:
+    case EXP.newAnonymousClass:
         return true;
-    case TOK.call:
+    case EXP.call:
         {
+            if (assumeImpureCalls)
+                return true;
+
+            if (e.type && e.type.ty == Tnoreturn)
+                return true;
+
             CallExp ce = cast(CallExp)e;
             /* Calling a function or delegate that is pure nothrow
              * has no side effects.
@@ -195,13 +207,13 @@ private bool lambdaHasSideEffect(Expression e)
             }
             break;
         }
-    case TOK.cast_:
+    case EXP.cast_:
         {
             CastExp ce = cast(CastExp)e;
             /* if:
              *  cast(classtype)func()  // because it may throw
              */
-            if (ce.to.ty == Tclass && ce.e1.op == TOK.call && ce.e1.type.ty == Tclass)
+            if (ce.to.ty == Tclass && ce.e1.op == EXP.call && ce.e1.type.ty == Tclass)
                 return true;
             break;
         }
@@ -223,7 +235,7 @@ bool discardValue(Expression e)
         return false;
     switch (e.op)
     {
-    case TOK.cast_:
+    case EXP.cast_:
         {
             CastExp ce = cast(CastExp)e;
             if (ce.to.equals(Type.tvoid))
@@ -235,9 +247,9 @@ bool discardValue(Expression e)
             }
             break; // complain
         }
-    case TOK.error:
+    case EXP.error:
         return false;
-    case TOK.variable:
+    case EXP.variable:
         {
             VarDeclaration v = (cast(VarExp)e).var.isVarDeclaration();
             if (v && (v.storage_class & STC.temp))
@@ -248,7 +260,7 @@ bool discardValue(Expression e)
             }
             break;
         }
-    case TOK.call:
+    case EXP.call:
         /* Issue 3882: */
         if (global.params.warnings != DiagnosticReporting.off && !global.gag)
         {
@@ -273,7 +285,7 @@ bool discardValue(Expression e)
                     const(char)* s;
                     if (ce.f)
                         s = ce.f.toPrettyChars();
-                    else if (ce.e1.op == TOK.star)
+                    else if (ce.e1.op == EXP.star)
                     {
                         // print 'fp' if ce.e1 is (*fp)
                         s = (cast(PtrExp)ce.e1).e1.toChars();
@@ -285,13 +297,13 @@ bool discardValue(Expression e)
             }
         }
         return false;
-    case TOK.andAnd:
-    case TOK.orOr:
+    case EXP.andAnd:
+    case EXP.orOr:
         {
             LogicalExp aae = cast(LogicalExp)e;
             return discardValue(aae.e2);
         }
-    case TOK.question:
+    case EXP.question:
         {
             CondExp ce = cast(CondExp)e;
             /* https://issues.dlang.org/show_bug.cgi?id=6178
@@ -321,24 +333,18 @@ bool discardValue(Expression e)
             }
             return false;
         }
-    case TOK.comma:
+    case EXP.comma:
         {
             CommaExp ce = cast(CommaExp)e;
-            /* Check for compiler-generated code of the form  auto __tmp, e, __tmp;
-             * In such cases, only check e for side effect (it's OK for __tmp to have
-             * no side effect).
-             * See https://issues.dlang.org/show_bug.cgi?id=4231 for discussion
-             */
-            auto fc = firstComma(ce);
-            if (fc.op == TOK.declaration && ce.e2.op == TOK.variable && (cast(DeclarationExp)fc).declaration == (cast(VarExp)ce.e2).var)
-            {
+            // Don't complain about compiler-generated comma expressions
+            if (ce.isGenerated)
                 return false;
-            }
+
             // Don't check e1 until we cast(void) the a,b code generation.
             // This is concretely done in expressionSemantic, if a CommaExp has Tvoid as type
             return discardValue(ce.e2);
         }
-    case TOK.tuple:
+    case EXP.tuple:
         /* Pass without complaint if any of the tuple elements have side effects.
          * Ideally any tuple elements with no side effects should raise an error,
          * this needs more investigation as to what is the right thing to do.

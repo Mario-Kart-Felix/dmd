@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/traits.html, Traits)
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/traits.d, _traits.d)
@@ -18,12 +18,13 @@ import core.stdc.stdio;
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.astcodegen;
+import dmd.astenums;
 import dmd.attrib;
 import dmd.canthrow;
 import dmd.dclass;
 import dmd.declaration;
-import dmd.denum;
 import dmd.dimport;
+import dmd.dmangle;
 import dmd.dmodule;
 import dmd.dscope;
 import dmd.dsymbol;
@@ -48,7 +49,7 @@ import dmd.tokens;
 import dmd.typesem;
 import dmd.visitor;
 import dmd.root.rootobject;
-import dmd.root.outbuffer;
+import dmd.common.outbuffer;
 import dmd.root.string;
 
 enum LOGSEMANTIC = false;
@@ -79,9 +80,9 @@ private Dsymbol getDsymbolWithoutExpCtx(RootObject oarg)
 {
     if (auto e = isExpression(oarg))
     {
-        if (e.op == TOK.dotVariable)
+        if (e.op == EXP.dotVariable)
             return (cast(DotVarExp)e).var;
-        if (e.op == TOK.dotTemplateDeclaration)
+        if (e.op == EXP.dotTemplateDeclaration)
             return (cast(DotTemplateExp)e).td;
     }
     return getDsymbol(oarg);
@@ -492,12 +493,8 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
 
         if (t)
         {
-            if (t.ty == Tfunction)
-                return cast(TypeFunction)t;
-            else if (t.ty == Tdelegate)
-                return cast(TypeFunction)t.nextOf();
-            else if (t.ty == Tpointer && t.nextOf().ty == Tfunction)
-                return cast(TypeFunction)t.nextOf();
+            if (auto tf = t.isFunction_Delegate_PtrToFunction())
+                return tf;
         }
 
         return null;
@@ -524,8 +521,6 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 auto y = s.isDeclaration();
             static if (is(T == FuncDeclaration))
                 auto y = s.isFuncDeclaration();
-            static if (is(T == EnumMember))
-                auto y = s.isEnumMember();
 
             if (!y || !fp(y))
                 return False();
@@ -537,7 +532,6 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
     alias isDsymX = isX!Dsymbol;
     alias isDeclX = isX!Declaration;
     alias isFuncX = isX!FuncDeclaration;
-    alias isEnumMemX = isX!EnumMember;
 
     Expression isPkgX(bool function(Package) fp)
     {
@@ -575,7 +569,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
     {
         if (global.params.vcomplex)
         {
-            if (isTypeX(t => t.iscomplex() || t.isimaginary()).isBool(true))
+            if (isTypeX(t => t.iscomplex() || t.isimaginary()).toBool().hasValue(true))
                 return True();
         }
         return isDsymX(t => t.isDeprecated());
@@ -950,6 +944,32 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
         ex = ex.expressionSemantic(sc);
         return ex;
     }
+    if (e.ident == Id.toType)
+    {
+        if (dim != 1)
+            return dimError(1);
+
+        auto ex = isExpression((*e.args)[0]);
+        if (!ex)
+        {
+            e.error("expression expected as second argument of __traits `%s`", e.ident.toChars());
+            return ErrorExp.get();
+        }
+        ex = ex.ctfeInterpret();
+
+        StringExp se = semanticString(sc, ex, "__traits(toType, string)");
+        if (!se)
+        {
+            return ErrorExp.get();
+        }
+        Type t = decoToType(se.toUTF8(sc).peekString());
+        if (!t)
+        {
+            e.error("cannot determine `%s`", e.toChars());
+            return ErrorExp.get();
+        }
+        return (new TypeExp(e.loc, t)).expressionSemantic(sc);
+    }
     if (e.ident == Id.hasMember ||
         e.ident == Id.getMember ||
         e.ident == Id.getOverloads ||
@@ -978,7 +998,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 e.error("`bool` expected as third argument of `__traits(getOverloads)`, not `%s` of type `%s`", b.toChars(), b.type.toChars());
                 return ErrorExp.get();
             }
-            includeTemplates = b.isBool(true);
+            includeTemplates = b.toBool().hasValue(true);
         }
 
         StringExp se = ex.toStringExp();
@@ -1035,7 +1055,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         else if (e.ident == Id.getMember)
         {
-            if (ex.op == TOK.dotIdentifier)
+            if (ex.op == EXP.dotIdentifier)
                 // Prevent semantic() from replacing Symbol with its initializer
                 (cast(DotIdExp)ex).wantsym = true;
             ex = ex.expressionSemantic(scx);
@@ -1065,7 +1085,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
             {
                 if (dve.var.isFuncDeclaration() || dve.var.isOverDeclaration())
                     f = dve.var;
-                if (dve.e1.op == TOK.dotType || dve.e1.op == TOK.this_)
+                if (dve.e1.op == EXP.dotType || dve.e1.op == EXP.this_)
                     ex = null;
                 else
                     ex = dve.e1;
@@ -1085,7 +1105,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 if (td && td.funcroot)
                     f = td.funcroot;
                 ex = null;
-                if (dte.e1.op != TOK.dotType && dte.e1.op != TOK.this_)
+                if (dte.e1.op != EXP.dotType && dte.e1.op != EXP.this_)
                     ex = dte.e1;
             }
             bool[string] funcTypeHash;
@@ -1142,7 +1162,10 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                                 td.overroot = null;
                                 td.overnext = null;
                             }
-                            exps.push(new DsymbolExp(Loc.initial, td, false));
+
+                            auto e = ex ? new DotTemplateExp(Loc.initial, ex, td)
+                                        : new DsymbolExp(Loc.initial, td);
+                            exps.push(e);
                         }
                     }
                     return 0;
@@ -1267,7 +1290,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 Expression x = isExpression(o);
                 Type t = isType(o);
                 if (x)
-                    printf("e = %s %s\n", Token.toChars(x.op), x.toChars());
+                    printf("e = %s %s\n", EXPtoString(x.op).ptr, x.toChars());
                 if (t)
                     printf("t = %d %s\n", t.ty, t.toChars());
             }
@@ -1387,20 +1410,35 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
         auto o = (*e.args)[0];
         auto o1 = (*e.args)[1];
 
-        FuncDeclaration fd;
-        TypeFunction tf = toTypeFunction(o, fd);
-
         ParameterList fparams;
-        if (tf)
-            fparams = tf.parameterList;
-        else if (fd)
-            fparams = fd.getParameterList();
+
+        CallExp ce;
+        if (auto exp = isExpression(o))
+            ce = exp.isCallExp();
+
+        if (ce)
+        {
+            fparams = ce.f.getParameterList();
+        }
         else
         {
-            e.error("first argument to `__traits(getParameterStorageClasses, %s, %s)` is not a function",
-                o.toChars(), o1.toChars());
-            return ErrorExp.get();
+            FuncDeclaration fd;
+            auto tf = toTypeFunction(o, fd);
+            if (tf)
+                fparams = tf.parameterList;
+            else if (fd)
+                fparams = fd.getParameterList();
+            else
+            {
+                e.error("first argument to `__traits(getParameterStorageClasses, %s, %s)` is not a function or a function call",
+                    o.toChars(), o1.toChars());
+                return ErrorExp.get();
+            }
         }
+
+        // Avoid further analysis for invalid functions leading to misleading error messages
+        if (!fparams.parameters)
+            return ErrorExp.get();
 
         StorageClass stc;
 
@@ -1442,10 +1480,10 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
 
         if (stc & STC.out_)
             push("out");
-        else if (stc & STC.ref_)
-            push("ref");
         else if (stc & STC.in_)
             push("in");
+        else if (stc & STC.ref_)
+            push("ref");
         else if (stc & STC.lazy_)
             push("lazy");
         else if (stc & STC.alias_)
@@ -1516,6 +1554,9 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                     case ClassKind.objc:
                         link = LINK.objc;
                         break;
+                    case ClassKind.c:
+                        link = LINK.c;
+                        break;
                 }
             }
         }
@@ -1573,6 +1614,9 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 {
                     return 0;
                 }
+                // skip 'this' context pointers
+                else if (decl.isThisDeclaration())
+                    return 0;
             }
 
             // https://issues.dlang.org/show_bug.cgi?id=20915
@@ -1748,7 +1792,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                         err |= tf.isnothrow && canThrow(ex, sc2.func, false);
                     }
                     ex = checkGC(sc2, ex);
-                    if (ex.op == TOK.error)
+                    if (ex.op == EXP.error)
                         err = true;
                 }
             }
@@ -1874,6 +1918,27 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
     if (e.ident == Id.getPointerBitmap)
     {
         return pointerBitmap(e);
+    }
+    if (e.ident == Id.initSymbol)
+    {
+        if (dim != 1)
+            return dimError(1);
+
+        auto o = (*e.args)[0];
+        Type t = isType(o);
+        AggregateDeclaration ad = t ? isAggregate(t) : null;
+
+        // Interfaces don't have an init symbol and hence cause linker errors
+        if (!ad || ad.isInterfaceDeclaration())
+        {
+            e.error("struct / class type expected as argument to __traits(initSymbol) instead of `%s`", o.toChars());
+            return ErrorExp.get();
+        }
+
+        Declaration d = new SymbolDeclaration(ad.loc, ad);
+        d.type = Type.tvoid.arrayOf().constOf();
+        d.storage_class |= STC.rvalue;
+        return new VarExp(e.loc, d);
     }
     if (e.ident == Id.isZeroInit)
     {
@@ -2061,7 +2126,7 @@ private bool isSame(RootObject o1, RootObject o2, Scope* sc)
         }
         else if (auto ea = isExpression(oarg))
         {
-            if (ea.op == TOK.function_)
+            if (ea.op == EXP.function_)
             {
                 if (auto fe = cast(FuncExp)ea)
                     return fe.fd;

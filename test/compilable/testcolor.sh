@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-# We never use ANSI codes on Windows, so, we can't test them.
-if [[ $OS = *"win"* ]]; then exit 0; fi
-
 compare()
 {
     local actual="$1"
@@ -44,7 +41,12 @@ check -color=off "$gooCode" "$gooExpectedWithoutColor"
 if [[ "$(script --version)" == script\ from\ util-linux\ * ]]
 then
     actual="$(SHELL="$(command -v bash)" TERM="faketerm" script -q -c "echo test | ( $DMD -c -o- -)" /dev/null | normalize)" || true
-    if [[ "$actual" != '^@^@'* ]] # 'script' weirdness on CircleCI
+
+    # Weird results for WSL, probably some environmental issue
+    if uname -a | grep -i linux | grep -i microsoft &> /dev/null
+    then
+        echo "Skipping test because of WSL weirdness"
+    elif [[ "$actual" != '^@^@'* ]] # 'script' weirdness on CircleCI
     then
         compare "$actual" "$expectedWithColor"
     fi

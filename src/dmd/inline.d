@@ -4,7 +4,7 @@
  * The AST is traversed, and every function call is considered for inlining using `inlinecost.d`.
  * The function call is then inlined if this cost is below a threshold.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:    $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/inline.d, _inline.d)
@@ -20,6 +20,7 @@ import core.stdc.string;
 import dmd.aggregate;
 import dmd.apply;
 import dmd.arraytypes;
+import dmd.astenums;
 import dmd.attrib;
 import dmd.declaration;
 import dmd.dmodule;
@@ -331,12 +332,12 @@ public:
             }
             else if (e1)
             {
-                result = new LogicalExp(econd.loc, TOK.andAnd, econd, e1);
+                result = new LogicalExp(econd.loc, EXP.andAnd, econd, e1);
                 result.type = Type.tvoid;
             }
             else if (e2)
             {
-                result = new LogicalExp(econd.loc, TOK.orOr, econd, e2);
+                result = new LogicalExp(econd.loc, EXP.orOr, econd, e2);
                 result.type = Type.tvoid;
             }
             else
@@ -429,7 +430,7 @@ public:
 
         override void visit(Expression e)
         {
-            //printf("Expression.doInlineAs!%s(%s): %s\n", Result.stringof.ptr, Token.toChars(e.op), e.toChars());
+            //printf("Expression.doInlineAs!%s(%s): %s\n", Result.stringof.ptr, EXPtoString(e.op).ptr, e.toChars());
             result = e.copy();
         }
 
@@ -632,7 +633,7 @@ public:
                         foreach (i; 0 .. tup.objects.dim)
                         {
                             DsymbolExp se = (*tup.objects)[i];
-                            assert(se.op == TOK.dSymbol);
+                            assert(se.op == EXP.dSymbol);
                             se.s;
                         }
                         result = st.objects.dim;
@@ -910,10 +911,7 @@ public:
 
         override void visit(ArrayExp e)
         {
-            auto ce = e.copy().isArrayExp();
-            ce.e1 = doInlineAs!Expression(e.e1, ids);
-            ce.arguments = arrayExpressionDoInline(e.arguments);
-            result = ce;
+            assert(0); // this should have been lowered to something else
         }
 
         override void visit(CondExp e)
@@ -983,7 +981,7 @@ public:
 
         Statement inlineScanExpAsStatement(ref Expression exp)
         {
-            /* If there's a TOK.call at the top, then it may fail to inline
+            /* If there's a EXP.call at the top, then it may fail to inline
              * as an Expression. Try to inline as a Statement instead.
              */
             if (auto ce = exp.isCallExp())
@@ -1013,6 +1011,15 @@ public:
             }
             if (auto e = exp.isCommaExp())
             {
+                /* If expression declares temporaries which have to be destructed
+                 * at the end of the scope then it is better handled as an expression.
+                 */
+                if (expNeedsDtor(e.e1))
+                {
+                    inlineScan(exp);
+                    return null;
+                }
+
                 auto s1 = inlineScanExpAsStatement(e.e1);
                 auto s2 = inlineScanExpAsStatement(e.e2);
                 if (!s1 && !s2)
@@ -1216,7 +1223,7 @@ public:
                 foreach (i; 0 .. td.objects.dim)
                 {
                     DsymbolExp se = cast(DsymbolExp)(*td.objects)[i];
-                    assert(se.op == TOK.dSymbol);
+                    assert(se.op == EXP.dSymbol);
                     scanVar(se.s); // TODO
                 }
             }
@@ -1260,7 +1267,7 @@ public:
     override void visit(AssignExp e)
     {
         // Look for NRVO, as inlining NRVO function returns require special handling
-        if (e.op == TOK.construct && e.e2.op == TOK.call)
+        if (e.op == EXP.construct && e.e2.op == EXP.call)
         {
             auto ce = e.e2.isCallExp();
             if (ce.f && ce.f.nrvo_can && ce.f.nrvo_var) // NRVO
@@ -1370,7 +1377,7 @@ public:
                 {
                     //printf("init: %s\n", v._init.toChars());
                     auto ei = v._init.isExpInitializer();
-                    if (ei && ei.exp.op == TOK.blit)
+                    if (ei && ei.exp.op == EXP.blit)
                     {
                         Expression e2 = (cast(AssignExp)ei.exp).e2;
                         if (auto fe = e2.isFuncExp())
@@ -1397,7 +1404,7 @@ public:
             fd = dve.var.isFuncDeclaration();
             if (fd && fd != parent && canInline(fd, true, false, asStatements))
             {
-                if (dve.e1.op == TOK.call && dve.e1.type.toBasetype().ty == Tstruct)
+                if (dve.e1.op == EXP.call && dve.e1.type.toBasetype().ty == Tstruct)
                 {
                     /* To create ethis, we'll need to take the address
                      * of dve.e1, but this won't work if dve.e1 is
@@ -1410,8 +1417,8 @@ public:
                 }
             }
         }
-        else if (e.e1.op == TOK.star &&
-                 (cast(PtrExp)e.e1).e1.op == TOK.variable)
+        else if (e.e1.op == EXP.star &&
+                 (cast(PtrExp)e.e1).e1.op == EXP.variable)
         {
             auto ve = e.e1.isPtrExp().e1.isVarExp();
             VarDeclaration v = ve.var.isVarDeclaration();
@@ -1419,7 +1426,7 @@ public:
             {
                 //printf("init: %s\n", v._init.toChars());
                 auto ei = v._init.isExpInitializer();
-                if (ei && ei.exp.op == TOK.blit)
+                if (ei && ei.exp.op == EXP.blit)
                 {
                     Expression e2 = (cast(AssignExp)ei.exp).e2;
                     // function pointer call
@@ -1448,7 +1455,7 @@ public:
         if (eresult && e.type.ty != Tvoid)
         {
             Expression ex = eresult;
-            while (ex.op == TOK.comma)
+            while (ex.op == EXP.comma)
             {
                 ex.type = e.type;
                 ex = ex.isCommaExp().e2;
@@ -2019,11 +2026,22 @@ private void expandInline(Loc callLoc, FuncDeclaration fd, FuncDeclaration paren
 
             auto ei = new ExpInitializer(vfrom.loc, arg);
             auto vto = new VarDeclaration(vfrom.loc, vfrom.type, vfrom.ident, ei);
-            vto.storage_class |= vfrom.storage_class & (STC.temp | STC.IOR | STC.lazy_);
+            vto.storage_class |= vfrom.storage_class & (STC.temp | STC.IOR | STC.lazy_ | STC.nodtor);
             vto.linkage = vfrom.linkage;
             vto.parent = parent;
             //printf("vto = '%s', vto.storage_class = x%x\n", vto.toChars(), vto.storage_class);
             //printf("vto.parent = '%s'\n", parent.toChars());
+
+            if (VarExp ve = arg.isVarExp())
+            {
+                VarDeclaration va = ve.var.isVarDeclaration();
+                if (va && va.isArgDtorVar)
+                {
+                    assert(vto.storage_class & STC.nodtor);
+                    // The destructor is called on va so take it by ref
+                    vto.storage_class |= STC.ref_;
+                }
+            }
 
             // Even if vto is STC.lazy_, `vto = arg` is handled correctly in glue layer.
             ei.exp = new BlitExp(vto.loc, vto, arg);
@@ -2041,7 +2059,7 @@ private void expandInline(Loc callLoc, FuncDeclaration fd, FuncDeclaration paren
              * any calls to the fp or dg can be inlined.
              */
             if (vfrom.type.ty == Tdelegate ||
-                vfrom.type.ty == Tpointer && vfrom.type.nextOf().ty == Tfunction)
+                vfrom.type.isPtrToFunction())
             {
                 if (auto ve = arg.isVarExp())
                 {
@@ -2053,7 +2071,7 @@ private void expandInline(Loc callLoc, FuncDeclaration fd, FuncDeclaration paren
                     if (se.var.isFuncDeclaration())
                         again = true;
                 }
-                else if (arg.op == TOK.function_ || arg.op == TOK.delegate_)
+                else if (arg.op == EXP.function_ || arg.op == EXP.delegate_)
                     again = true;
             }
         }
@@ -2190,23 +2208,23 @@ private bool isConstruction(Expression e)
 {
     e = lastComma(e);
 
-    if (e.op == TOK.structLiteral)
+    if (e.op == EXP.structLiteral)
     {
         return true;
     }
     /* Detect:
      *    structliteral.ctor(args)
      */
-    else if (e.op == TOK.call)
+    else if (e.op == EXP.call)
     {
         auto ce = cast(CallExp)e;
-        if (ce.e1.op == TOK.dotVariable)
+        if (ce.e1.op == EXP.dotVariable)
         {
             auto dve = cast(DotVarExp)ce.e1;
             auto fd = dve.var.isFuncDeclaration();
             if (fd && fd.isCtorDeclaration())
             {
-                if (dve.e1.op == TOK.structLiteral)
+                if (dve.e1.op == EXP.structLiteral)
                 {
                     return true;
                 }
@@ -2263,7 +2281,7 @@ private bool argumentsNeedDtors(Expressions* arguments)
     {
         foreach (arg; *arguments)
         {
-            if (argNeedsDtor(arg))
+            if (expNeedsDtor(arg))
                 return true;
         }
     }
@@ -2271,25 +2289,25 @@ private bool argumentsNeedDtors(Expressions* arguments)
 }
 
 /************************************************************
- * See if argument to a function is creating temporaries that
- * will need destruction after the function is executed.
+ * See if expression is creating temporaries that
+ * will need destruction at the end of the scope.
  * Params:
- *      arg = argument to function
+ *      exp = expression
  * Returns:
  *      true if temporaries need destruction
  */
 
-private bool argNeedsDtor(Expression arg)
+private bool expNeedsDtor(Expression exp)
 {
     extern (C++) final class NeedsDtor : StoppableVisitor
     {
         alias visit = typeof(super).visit;
-        Expression arg;
+        Expression exp;
 
     public:
-        extern (D) this(Expression arg)
+        extern (D) this(Expression exp)
         {
-            this.arg = arg;
+            this.exp = exp;
         }
 
         override void visit(Expression)
@@ -2298,8 +2316,7 @@ private bool argNeedsDtor(Expression arg)
 
         override void visit(DeclarationExp de)
         {
-            if (de != arg)
-                Dsymbol_needsDtor(de.declaration);
+            Dsymbol_needsDtor(de.declaration);
         }
 
         void Dsymbol_needsDtor(Dsymbol s)
@@ -2342,7 +2359,7 @@ private bool argNeedsDtor(Expression arg)
                     if (o.dyncast() == DYNCAST.expression)
                     {
                         Expression eo = cast(Expression)o;
-                        if (eo.op == TOK.dSymbol)
+                        if (eo.op == EXP.dSymbol)
                         {
                             DsymbolExp se = cast(DsymbolExp)eo;
                             Dsymbol_needsDtor(se.s);
@@ -2355,6 +2372,6 @@ private bool argNeedsDtor(Expression arg)
         }
     }
 
-    scope NeedsDtor ct = new NeedsDtor(arg);
-    return walkPostorder(arg, ct);
+    scope NeedsDtor ct = new NeedsDtor(exp);
+    return walkPostorder(exp, ct);
 }

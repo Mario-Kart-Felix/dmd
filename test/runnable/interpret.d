@@ -3571,6 +3571,96 @@ bool test20400()
 static assert(test20400());
 
 /************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=21878
+
+struct A21878
+{
+    int i;
+    ref inout(int) opIndex(size_t idx) inout return { return i; }
+}
+
+struct B21878
+{
+    A21878[1] a;
+    ref inout(int) opIndex(size_t idx) inout return { return a[0][idx]; }
+}
+
+bool ctfeFunc21878()
+{
+    A21878 a;
+    a[0] = 42;
+    assert(a[0] == 42); // OK
+
+    B21878 b;
+    b[0] = 42;
+    assert(b[0] == 42); // OK <- fails
+
+    return true;
+}
+
+void test21878()
+{
+    enum eval = ctfeFunc21878();
+    ctfeFunc21878(); // succeeds at runtime
+}
+
+/************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=20133
+
+void bar20133(ref string text)
+{
+    text = text[1 .. $];
+    assert(text.length < 3);
+    if (text.length == 2) assert(text == "oo");
+    if (text.length == 1) assert(text == "o");
+    if (text.length == 0) assert(text == "");
+    string tcopy = text;
+    if (tcopy.length > 0)
+        bar20133(tcopy);
+    assert(tcopy.length < 2);
+    if (tcopy.length == 1) assert(tcopy == "o");
+    if (tcopy.length == 0) assert(tcopy == "");
+}
+
+void bar20133_2(ref string text)
+{
+    auto ptext = &text;
+    *ptext = text[1 .. $];
+    assert(text.length < 3);
+    if (text.length == 2) assert(text == "oo");
+    if (text.length == 1) assert(text == "o");
+    if (text.length == 0) assert(text == "");
+    string tcopy = text;
+    if (tcopy.length > 0)
+        bar20133_2(tcopy);
+    assert(tcopy.length < 2);
+    if (tcopy.length == 1) assert(tcopy == "o");
+    if (tcopy.length == 0) assert(tcopy == "");
+}
+
+alias fun20133 = {
+    string input = "foo";
+    bar20133(input);
+    assert(input == "oo");
+    return input;
+};
+
+alias fun20133_2 = {
+    string input = "foo";
+    bar20133_2(input);
+    assert(input == "oo");
+    return input;
+};
+
+void test20133()
+{
+    enum ctest = fun20133();
+    enum ctest2 = fun20133_2();
+    auto rtest = fun20133();
+    auto rtest2 = fun20133_2();
+}
+
+/************************************************/
 
 int main()
 {
@@ -3697,6 +3787,8 @@ int main()
     test15681();
     test20366();
     test20400();
+    test21878();
+    test20133();
 
     printf("Success\n");
     return 0;

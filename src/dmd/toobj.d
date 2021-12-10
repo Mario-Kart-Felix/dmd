@@ -1,7 +1,7 @@
 /**
  * Convert an AST that went through all semantic phases into an object file.
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/tocsym.d, _toobj.d)
@@ -17,12 +17,13 @@ import core.stdc.string;
 import core.stdc.time;
 
 import dmd.root.array;
-import dmd.root.outbuffer;
+import dmd.common.outbuffer;
 import dmd.root.rmem;
 import dmd.root.rootobject;
 
 import dmd.aggregate;
 import dmd.arraytypes;
+import dmd.astenums;
 import dmd.attrib;
 import dmd.dclass;
 import dmd.declaration;
@@ -599,11 +600,16 @@ void toObjFile(Dsymbol ds, bool multiobj)
             } while (parent);
             s.Sfl = FLdata;
 
-            if (!sz && vd.type.toBasetype().ty != Tsarray)
-                assert(0); // this shouldn't be possible
+            // Size 0 should only be possible for T[0] and noreturn
+            if (!sz)
+            {
+                const ty = vd.type.toBasetype().ty;
+                if (ty != Tsarray && ty != Tnoreturn)
+                    assert(0); // this shouldn't be possible
+            }
 
             auto dtb = DtBuilder(0);
-            if (config.objfmt == OBJ_MACH && global.params.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread)
+            if (config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread)
             {
                 tlsToDt(vd, s, sz, dtb);
             }
@@ -747,7 +753,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
                 Expression e = (*pd.args)[0];
 
-                assert(e.op == TOK.string_);
+                assert(e.op == EXP.string_);
 
                 StringExp se = cast(StringExp)e;
                 char *name = cast(char *)mem.xmalloc(se.numberOfCodeUnits() + 1);
@@ -782,45 +788,13 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
                 Expression e = (*pd.args)[0];
 
-                assert(e.op == TOK.string_);
+                assert(e.op == EXP.string_);
 
                 StringExp se = cast(StringExp)e;
                 char *directive = cast(char *)mem.xmalloc(se.numberOfCodeUnits() + 1);
                 se.writeTo(directive, true);
 
                 obj_linkerdirective(directive);
-            }
-            else if (pd.ident == Id.crt_constructor || pd.ident == Id.crt_destructor)
-            {
-                immutable isCtor = pd.ident == Id.crt_constructor;
-
-                static uint recurse(Dsymbol s, bool isCtor)
-                {
-                    if (auto ad = s.isAttribDeclaration())
-                    {
-                        uint nestedCount;
-                        auto decls = ad.include(null);
-                        if (decls)
-                        {
-                            for (size_t i = 0; i < decls.dim; ++i)
-                                nestedCount += recurse((*decls)[i], isCtor);
-                        }
-                        return nestedCount;
-                    }
-                    else if (auto f = s.isFuncDeclaration())
-                    {
-                        f.isCrtCtorDtor |= isCtor ? 1 : 2;
-                        if (f.linkage != LINK.c)
-                            f.error("must be `extern(C)` for `pragma(%s)`", isCtor ? "crt_constructor".ptr : "crt_destructor".ptr);
-                        return 1;
-                    }
-                    else
-                        return 0;
-                    assert(0);
-                }
-
-                if (recurse(pd, isCtor) > 1)
-                    pd.error("can only apply to a single declaration");
             }
 
             visit(cast(AttribDeclaration)pd);
@@ -934,7 +908,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
          */
         static void tlsToDt(VarDeclaration vd, Symbol *s, uint sz, ref DtBuilder dtb)
         {
-            assert(config.objfmt == OBJ_MACH && global.params.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
+            assert(config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
 
             Symbol *tlvInit = createTLVDataSymbol(vd, s);
             auto tlvInitDtb = DtBuilder(0);
@@ -949,7 +923,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             tlvInit.Sdt = tlvInitDtb.finish();
             outdata(tlvInit);
 
-            if (global.params.is64bit)
+            if (target.is64bit)
                 tlvInit.Sclass = SCextern;
 
             Symbol* tlvBootstrap = objmod.tlv_bootstrap();
@@ -969,7 +943,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
          */
         static Symbol *createTLVDataSymbol(VarDeclaration vd, Symbol *s)
         {
-            assert(config.objfmt == OBJ_MACH && global.params.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
+            assert(config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
 
             // Compute identifier for tlv symbol
             OutBuffer buffer;
@@ -1005,7 +979,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             final switch (vd.linkage)
             {
                 case LINK.windows:
-                    return global.params.is64bit ? mTYman_c : mTYman_std;
+                    return target.is64bit ? mTYman_c : mTYman_std;
 
                 case LINK.objc:
                 case LINK.c:
@@ -1258,7 +1232,7 @@ private void genClassInfoForClass(ClassDeclaration cd, Symbol* sinit)
     size_t namelen = strlen(name);
     if (!(namelen > 9 && memcmp(name, "TypeInfo_".ptr, 9) == 0))
     {
-        name = cd.toPrettyChars();
+        name = cd.toPrettyChars(/*QualifyTypes=*/ true);
         namelen = strlen(name);
     }
     dtb.size(namelen);
@@ -1485,7 +1459,7 @@ private void genClassInfoForInterface(InterfaceDeclaration id)
     dtb.size(0);                        // initializer
 
     // name[]
-    const(char) *name = id.toPrettyChars();
+    const(char) *name = id.toPrettyChars(/*QualifyTypes=*/ true);
     size_t namelen = strlen(name);
     dtb.size(namelen);
     dt_t *pdtname = dtb.xoffpatch(id.csym, 0, TYnptr);
