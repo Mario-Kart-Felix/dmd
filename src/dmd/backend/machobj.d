@@ -2,11 +2,11 @@
  * Generate Mach-O object files
  *
  * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * $(LINK2 https://www.dlang.org, D programming language).
  *
- * Copyright:   Copyright (C) 2009-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 2009-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/machobj.d, backend/machobj.d)
  */
 
@@ -278,7 +278,7 @@ struct Relocation
                         // to address of this symbol
     uint targseg;       // if !=0, then location is to be fixed up
                         // to address of start of this segment
-    ubyte rtype;        // RELxxxx
+    ubyte rtype;        // RELaddr or RELrel
     ubyte flag;         // 1: emit SUBTRACTOR/UNSIGNED pair
     short val;          // 0, -1, -2, -4
 }
@@ -871,7 +871,7 @@ version (SCPP)
                 section_64 *psechdr = &SecHdrTab64[pseg.SDshtidx]; // corresponding section
 
                 // Do zero-fill the second time through this loop
-                if (i ^ (psechdr.flags == S_ZEROFILL))
+                if (i ^ (psechdr.flags == S_ZEROFILL || psechdr.flags == S_THREAD_LOCAL_ZEROFILL))
                     continue;
 
                 int align_ = 1 << psechdr._align;
@@ -882,7 +882,7 @@ version (SCPP)
                 }
                 foffset = elf_align(align_, foffset);
                 vmaddr = (vmaddr + align_ - 1) & ~(align_ - 1);
-                if (psechdr.flags == S_ZEROFILL)
+                if (psechdr.flags == S_ZEROFILL || psechdr.flags == S_THREAD_LOCAL_ZEROFILL)
                 {
                     psechdr.offset = 0;
                     psechdr.size = pseg.SDoffset; // accumulated size
@@ -909,7 +909,7 @@ version (SCPP)
                 section *psechdr = &SecHdrTab[pseg.SDshtidx]; // corresponding section
 
                 // Do zero-fill the second time through this loop
-                if (i ^ (psechdr.flags == S_ZEROFILL))
+                if (i ^ (psechdr.flags == S_ZEROFILL || psechdr.flags == S_THREAD_LOCAL_ZEROFILL))
                     continue;
 
                 int align_ = 1 << psechdr._align;
@@ -920,7 +920,7 @@ version (SCPP)
                 }
                 foffset = elf_align(align_, foffset);
                 vmaddr = (vmaddr + align_ - 1) & ~(align_ - 1);
-                if (psechdr.flags == S_ZEROFILL)
+                if (psechdr.flags == S_ZEROFILL || psechdr.flags == S_THREAD_LOCAL_ZEROFILL)
                 {
                     psechdr.offset = 0;
                     psechdr.size = cast(uint)pseg.SDoffset; // accumulated size
@@ -999,7 +999,7 @@ version (SCPP)
                 {
                     //printf("Relocation\n");
                     //symbol_print(s);
-                    if (r.flag == 1)
+                    if (r.flag == 1)  // emit SUBTRACTOR/UNSIGNED pair
                     {
                         if (I64)
                         {
@@ -1069,10 +1069,13 @@ version (SCPP)
                             if (s.Sclass == SCextern ||
                                 s.Sclass == SCcomdef ||
                                 s.Sclass == SCcomdat ||
+                                s.Sclass == SCstatic ||
                                 s.Sclass == SCglobal)
                             {
-                                if (I64 && (s.ty() & mTYLINK) == mTYthread && r.rtype == RELaddr)
+                                if ((s.ty() & mTYLINK) == mTYthread && r.rtype == RELaddr)
                                     rel.r_type = X86_64_RELOC_TLV;
+                                else if (s.Sfl == FLfunc && s.Sclass == SCstatic && r.rtype == RELaddr)
+                                    rel.r_type = X86_64_RELOC_SIGNED;
                                 else if ((s.Sfl == FLfunc || s.Sfl == FLextern || s.Sclass == SCglobal || s.Sclass == SCcomdat || s.Sclass == SCcomdef) && r.rtype == RELaddr)
                                 {
                                     rel.r_type = X86_64_RELOC_GOT_LOAD;
@@ -1893,7 +1896,7 @@ int MachObj_getsegment(const(char)* sectname, const(char)* segname,
 
     if (!pseg.SDbuf)
     {
-        if (flags != S_ZEROFILL)
+        if (flags != S_ZEROFILL && flags != S_THREAD_LOCAL_ZEROFILL)
         {
             pseg.SDbuf = cast(OutBuffer*) calloc(1, OutBuffer.sizeof);
             assert(pseg.SDbuf);
@@ -2418,7 +2421,9 @@ void MachObj_lidata(int seg,targ_size_t offset,targ_size_t count)
 {
     //printf("MachObj_lidata(%d,%x,%d)\n",seg,offset,count);
     size_t idx = SegData[seg].SDshtidx;
-    if ((I64 ? SecHdrTab64[idx].flags : SecHdrTab[idx].flags) == S_ZEROFILL)
+
+    const flags = (I64 ? SecHdrTab64[idx].flags : SecHdrTab[idx].flags);
+    if (flags == S_ZEROFILL || flags == S_THREAD_LOCAL_ZEROFILL)
     {   // Use SDoffset to record size of bss section
         SegData[seg].SDoffset += count;
     }
@@ -2584,7 +2589,7 @@ static if (0)
 
 void MachObj_reftocodeseg(int seg,targ_size_t offset,targ_size_t val)
 {
-    //printf("MachObj_reftocodeseg(seg=%d, offset=x%lx, val=x%lx )\n",seg,cast(uint)offset,cast(uint)val);
+    //printf("MachObj_reftocodeseg(seg=%d, offset=x%x, val=x%x )\n",seg,cast(uint)offset,cast(uint)val);
     assert(seg > 0);
     OutBuffer *buf = SegData[seg].SDbuf;
     int save = cast(int)buf.length();
@@ -2621,8 +2626,9 @@ int MachObj_reftoident(int seg, targ_size_t offset, Symbol *s, targ_size_t val,
     int retsize = (flags & CFoffset64) ? 8 : 4;
 static if (0)
 {
-    printf("\nMachObj_reftoident('%s' seg %d, offset x%llx, val x%llx, flags x%x)\n",
+    printf("\nMachObj_reftoident('%s' seg %d, offset x%llx, val x%llx, flags x%x) ",
         s.Sident.ptr,seg,cast(ulong)offset,cast(ulong)val,flags);
+    CF_print(flags);
     printf("retsize = %d\n", retsize);
     //dbg_printf("Sseg = %d, Sxtrnnum = %d\n",s.Sseg,s.Sxtrnnum);
     symbol_print(s);

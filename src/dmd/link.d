@@ -1,9 +1,9 @@
 /**
  * Invoke the linker as a separate process.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/link.d, _link.d)
  * Documentation:  https://dlang.org/phobos/dmd_link.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/link.d
@@ -19,10 +19,10 @@ import core.sys.posix.stdlib;
 import core.sys.posix.unistd;
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
-import dmd.env;
+import dmd.dmdparams;
 import dmd.errors;
 import dmd.globals;
-import dmd.mars;
+import dmd.root.env;
 import dmd.root.file;
 import dmd.root.filename;
 import dmd.common.outbuffer;
@@ -226,7 +226,7 @@ public int runLINK()
         if (phobosLibname)
             global.params.libfiles.push(phobosLibname.xarraydup.ptr);
 
-        if (target.mscoff)
+        if (target.objectFormat() == Target.ObjectFormat.coff)
         {
             OutBuffer cmdbuf;
             cmdbuf.writestring("/NOLOGO");
@@ -259,7 +259,7 @@ public int runLINK()
                 cmdbuf.writestring("/MAP:");
                 writeFilename(&cmdbuf, global.params.mapfile);
             }
-            else if (dmdParams.map)
+            else if (driverParams.map)
             {
                 cmdbuf.writestring("/MAP:");
                 writeFilename(&cmdbuf, getMapFilename());
@@ -345,7 +345,7 @@ public int runLINK()
             }
             return status;
         }
-        else
+        else if (target.objectFormat() == Target.ObjectFormat.omf)
         {
             OutBuffer cmdbuf;
             global.params.libfiles.push("user32");
@@ -378,7 +378,7 @@ public int runLINK()
             cmdbuf.writeByte(',');
             if (global.params.mapfile)
                 writeFilename(&cmdbuf, global.params.mapfile);
-            else if (dmdParams.map)
+            else if (driverParams.map)
             {
                 writeFilename(&cmdbuf, getMapFilename());
             }
@@ -409,7 +409,7 @@ public int runLINK()
                 cmdbuf.writestring("/RC:");
                 writeFilename(&cmdbuf, global.params.resfile);
             }
-            if (dmdParams.map || global.params.mapfile)
+            if (driverParams.map || global.params.mapfile)
                 cmdbuf.writestring("/m");
             version (none)
             {
@@ -457,6 +457,10 @@ public int runLINK()
                 FileName.free(lnkfilename.ptr);
             }
             return status;
+        }
+        else
+        {
+            assert(0);
         }
     }
     else version (Posix)
@@ -583,7 +587,7 @@ public int runLINK()
             argv.push("-Xlinker");
             argv.push("-no_compact_unwind");
         }
-        if (dmdParams.map || global.params.mapfile.length)
+        if (driverParams.map || global.params.mapfile.length)
         {
             argv.push("-Xlinker");
             version (OSX)
@@ -706,8 +710,7 @@ public int runLINK()
         {
             const bufsize = 2 + libname.length + 1;
             auto buf = (cast(char*) malloc(bufsize))[0 .. bufsize];
-            if (!buf)
-                Mem.error();
+            Mem.check(buf.ptr);
             buf[0 .. 2] = "-l";
 
             char* getbuf(const(char)[] suffix)
@@ -838,7 +841,7 @@ version (Windows)
         size_t len;
         if (global.params.verbose)
             message("%s %s", cmd, args);
-        if (!target.mscoff)
+        if (target.objectFormat() == Target.ObjectFormat.omf)
         {
             if ((len = strlen(args)) > 255)
             {

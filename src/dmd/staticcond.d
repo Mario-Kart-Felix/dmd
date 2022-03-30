@@ -1,9 +1,9 @@
 /**
  * Lazily evaluate static conditions for `static if`, `static assert` and template constraints.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/staticcond.d, _staticcond.d)
  * Documentation:  https://dlang.org/phobos/dmd_staticcond.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/staticcond.d
@@ -109,18 +109,16 @@ bool evalStaticCondition(Scope* sc, Expression original, Expression e, out bool 
         e = e.ctfeInterpret();
 
         const opt = e.toBool();
-        if (opt.hasValue(true))
-            return true;
-        else if (opt.hasValue(false))
+        if (opt.isEmpty())
         {
-            if (negatives)
-                negatives.push(before);
+            e.error("expression `%s` is not constant", e.toChars());
+            errors = true;
             return false;
         }
 
-        e.error("expression `%s` is not constant", e.toChars());
-        errors = true;
-        return false;
+        if (negatives && !opt.get())
+            negatives.push(before);
+        return opt.get();
     }
     return impl(e);
 }

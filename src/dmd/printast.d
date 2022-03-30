@@ -1,9 +1,9 @@
 /**
  * Provides an AST printer for debugging.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/printast.d, _printast.d)
  * Documentation:  https://dlang.org/phobos/dmd_printast.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/printast.d
@@ -82,6 +82,24 @@ extern (C++) final class PrintASTVisitor : Visitor
         printf(".var: %s\n", e.var ? e.var.toChars() : "");
     }
 
+    override void visit(SymOffExp e)
+    {
+        printIndent(indent);
+        printf("SymOff %s\n", e.type ? e.type.toChars() : "");
+        printIndent(indent + 2);
+        printf(".var: %s\n", e.var ? e.var.toChars() : "");
+        printIndent(indent + 2);
+        printf(".offset: %llx\n", e.offset);
+    }
+
+    override void visit(VarExp e)
+    {
+        printIndent(indent);
+        printf("Var %s\n", e.type ? e.type.toChars() : "");
+        printIndent(indent + 2);
+        printf(".var: %s\n", e.var ? e.var.toChars() : "");
+    }
+
     override void visit(DsymbolExp e)
     {
         visit(cast(Expression)e);
@@ -104,6 +122,16 @@ extern (C++) final class PrintASTVisitor : Visitor
         printAST(e.e1, indent + 2);
     }
 
+    override void visit(CastExp e)
+    {
+        printIndent(indent);
+        auto s = EXPtoString(e.op);
+        printf("%.*s %s\n", cast(int)s.length, s.ptr, e.type ? e.type.toChars() : "");
+        printIndent(indent + 2);
+        printf(".to: %s\n", e.to.toChars());
+        printAST(e.e1, indent + 2);
+    }
+
     override void visit(VectorExp e)
     {
         printIndent(indent);
@@ -117,6 +145,15 @@ extern (C++) final class PrintASTVisitor : Visitor
     {
         printIndent(indent);
         printf("VectorArray %s\n", e.type ? e.type.toChars() : "");
+        printAST(e.e1, indent + 2);
+    }
+
+    override void visit(DotVarExp e)
+    {
+        printIndent(indent);
+        printf("DotVar %s\n", e.type ? e.type.toChars() : "");
+        printIndent(indent + 2);
+        printf(".var: %s\n", e.var.toChars());
         printAST(e.e1, indent + 2);
     }
 
@@ -172,5 +209,3 @@ extern (C++) final class PrintASTVisitor : Visitor
             putc(' ', stdout);
     }
 }
-
-

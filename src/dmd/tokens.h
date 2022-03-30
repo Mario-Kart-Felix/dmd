@@ -1,10 +1,10 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
- * http://www.digitalmars.com
+ * https://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
- * http://www.boost.org/LICENSE_1_0.txt
+ * https://www.boost.org/LICENSE_1_0.txt
  * https://github.com/dlang/dmd/blob/master/src/dmd/tokens.h
  */
 
@@ -32,7 +32,7 @@ class Identifier;
         ?       &&      ||
  */
 
-enum class TOK : unsigned short
+enum class TOK : unsigned char
 {
     reserved,
 
@@ -44,7 +44,6 @@ enum class TOK : unsigned short
     leftCurly,
     rightCurly,
     colon,
-    negate,
     semicolon,
     dotDotDot,
     endOfFile,
@@ -53,46 +52,22 @@ enum class TOK : unsigned short
     assert_,
     true_,
     false_,
-    array,
-    call,
-    address,
-    type,
     throw_,
     new_,
     delete_,
-    star,
-    symbolOffset,
     variable,
-    dotVariable,
-    dotIdentifier,
-    dotTemplateInstance,
-    dotType,
     slice,
-    arrayLength,
     version_,
     module_,
     dollar,
     template_,
-    dotTemplateDeclaration,
-    declaration,
     typeof_,
     pragma_,
-    dSymbol,
     typeid_,
-    uadd,
-    remove,
-    newAnonymousClass,
     comment,
-    arrayLiteral,
-    assocArrayLiteral,
-    structLiteral,
-    classReference,
-    thrownException,
-    delegatePointer,
-    delegateFunctionPointer,
 
     // Operators
-    lessThan,       // 54
+    lessThan,
     greaterThan,
     lessOrEqual,
     greaterOrEqual,
@@ -100,19 +75,15 @@ enum class TOK : unsigned short
     notEqual,
     identity,
     notIdentity,
-    index,
     is_,
 
-    leftShift,      // 64
+    leftShift,
     rightShift,
     leftShiftAssign,
     rightShiftAssign,
     unsignedRightShift,
     unsignedRightShiftAssign,
-    concatenate,
     concatenateAssign, // ~=
-    concatenateElemAssign,
-    concatenateDcharAssign,
     add,
     min,
     addAssign,
@@ -134,18 +105,14 @@ enum class TOK : unsigned short
     tilde,
     plusPlus,
     minusMinus,
-    construct,
-    blit,
     dot,
     comma,
     question,
     andAnd,
     orOr,
-    prePlusPlus,
-    preMinusMinus,
 
     // Numeric literals
-    int32Literal,   // 104,
+    int32Literal,
     uns32Literal,
     int64Literal,
     uns64Literal,
@@ -159,22 +126,19 @@ enum class TOK : unsigned short
     imaginary80Literal,
 
     // Char constants
-    charLiteral,    // 116,
+    charLiteral,
     wcharLiteral,
     dcharLiteral,
 
     // Leaf operators
-    identifier,     // 119,
+    identifier,
     string_,
-    hexadecimalString,
     this_,
     super_,
-    halt,
-    tuple,
     error,
 
     // Basic types
-    void_,          // 127
+    void_,
     int8,
     uns8,
     int16,
@@ -200,7 +164,7 @@ enum class TOK : unsigned short
     bool_,
 
     // Aggregates
-    struct_,        // 151
+    struct_,
     class_,
     interface_,
     union_,
@@ -232,7 +196,7 @@ enum class TOK : unsigned short
     immutable_,
 
     // Statements
-    if_,            // 181
+    if_,
     else_,
     while_,
     for_,
@@ -258,7 +222,7 @@ enum class TOK : unsigned short
     onScopeSuccess,
 
     // Contracts
-    invariant_,     // 205
+    invariant_,
 
     // Testing
     unittest_,
@@ -268,9 +232,8 @@ enum class TOK : unsigned short
     ref_,
     macro_,
 
-    parameters,     // 210
+    parameters,
     traits,
-    overloadSet,
     pure_,
     nothrow_,
     gshared,
@@ -288,18 +251,11 @@ enum class TOK : unsigned short
     vector,
     pound,
 
-    interval,       // 229
-    voidExpression,
-    cantExpression,
-    showCtfeContext,
-
-    objcClassReference,
-    vectorArray,
-
     arrow,      // ->
     colonColon, // ::
     wchar_tLiteral,
-    compoundLiteral, // ( type-name ) { initializer-list }
+    endOfLine,  // \n, \r, \u2028, \u2029
+    whitespace,
 
     // C only keywords
     inline_,
@@ -322,8 +278,10 @@ enum class TOK : unsigned short
     _Thread_local_,
 
     // C only extended keywords
-    cdecl,
+    _import,
+    cdecl_,
     declspec,
+    stdcall,
     attribute__,
 
     MAX,

@@ -3,9 +3,9 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/statement.html, Statements)
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/statement.d, _statement.d)
  * Documentation:  https://dlang.org/phobos/dmd_statement.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/statement.d
@@ -21,7 +21,6 @@ import dmd.arraytypes;
 import dmd.astenums;
 import dmd.ast_node;
 import dmd.gluelayer;
-import dmd.canthrow;
 import dmd.cond;
 import dmd.dclass;
 import dmd.declaration;
@@ -72,7 +71,7 @@ TypeIdentifier getException()
 }
 
 /***********************************************************
- * Specification: http://dlang.org/spec/statement.html
+ * Specification: https://dlang.org/spec/statement.html
  */
 extern (C++) abstract class Statement : ASTNode
 {
@@ -1762,6 +1761,9 @@ extern (C++) final class GotoStatement : Statement
         return new GotoStatement(loc, ident);
     }
 
+    /**************
+     * Returns: true for error
+     */
     extern (D) bool checkLabel()
     {
         if (!label.statement)

@@ -1,10 +1,10 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
- * http://www.digitalmars.com
+ * https://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
- * http://www.boost.org/LICENSE_1_0.txt
+ * https://www.boost.org/LICENSE_1_0.txt
  * https://github.com/dlang/dmd/blob/master/src/dmd/aggregate.h
  */
 
@@ -124,7 +124,7 @@ public:
     size_t nonHiddenFields();
     bool determineSize(const Loc &loc);
     virtual void finalizeSize() = 0;
-    d_uns64 size(const Loc &loc);
+    uinteger_t size(const Loc &loc);
     bool fill(const Loc &loc, Expressions *elements, bool ctorinit);
     Type *getType();
     bool isDeprecated() const;         // is aggregate deprecated?

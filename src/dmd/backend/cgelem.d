@@ -2,15 +2,15 @@
  * Local optimizations of elem trees
  *
  * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * $(LINK2 https://www.dlang.org, D programming language).
  *
  * Does strength reduction optimizations on the elem trees,
  * i.e. rewriting trees to less expensive trees.
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ *              Copyright (C) 2000-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cgelem.d, backend/cgelem.d)
  * Documentation:  https://dlang.org/phobos/dmd_backend_cgelem.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/backend/cgelem.d
@@ -2889,6 +2889,7 @@ private bool optim_loglog(elem **pe)
     if (n <= 3)
         return false;
     uint ty = e.Ety;
+    assert(n < size_t.max / (2 * (elem *).sizeof));   // conservative overflow check
     elem **array = cast(elem **)malloc(n * (elem *).sizeof);
     assert(array);
     elem **p = array;

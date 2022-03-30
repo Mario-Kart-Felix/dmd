@@ -1,9 +1,9 @@
 /**
  * Performs the semantic2 stage, which deals with initializer expressions.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/semantic2.d, _semantic2.d)
  * Documentation:  https://dlang.org/phobos/dmd_semantic2.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/semantic2.d
@@ -56,11 +56,11 @@ import dmd.root.filename;
 import dmd.common.outbuffer;
 import dmd.root.rmem;
 import dmd.root.rootobject;
+import dmd.root.utf;
 import dmd.sideeffect;
 import dmd.statementsem;
 import dmd.staticassert;
 import dmd.tokens;
-import dmd.utf;
 import dmd.statement;
 import dmd.target;
 import dmd.templateparamsem;
@@ -330,11 +330,14 @@ private extern(C++) final class Semantic2Visitor : Visitor
         // gets imported, it is unaffected by context.
         Scope* sc = Scope.createGlobal(mod); // create root scope
         //printf("Module = %p\n", sc.scopesym);
-        // Pass 2 semantic routines: do initializers and function bodies
-        for (size_t i = 0; i < mod.members.dim; i++)
+        if (mod.members)
         {
-            Dsymbol s = (*mod.members)[i];
-            s.semantic2(sc);
+            // Pass 2 semantic routines: do initializers and function bodies
+            for (size_t i = 0; i < mod.members.dim; i++)
+            {
+                Dsymbol s = (*mod.members)[i];
+                s.semantic2(sc);
+            }
         }
         if (mod.userAttribDecl)
         {
@@ -422,7 +425,7 @@ private extern(C++) final class Semantic2Visitor : Visitor
                 const sameParams = tf1.parameterList == tf2.parameterList;
 
                 // Allow the hack to declare overloads with different parameters/STC's
-                // @@@DEPRECATED_2.094@@@
+                // @@@DEPRECATED_2.104@@@
                 // Deprecated in 2020-08, make this an error in 2.104
                 if (parent1.isModule() &&
                     f1.linkage != LINK.d && f1.linkage != LINK.cpp &&

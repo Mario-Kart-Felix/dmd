@@ -14,14 +14,6 @@ tuple(height)
 tuple(get, get)
 tuple(clear)
 tuple(draw, draw)
-runnable/xtest46.d(149): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(151): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(152): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(154): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(181): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(183): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(184): Deprecation: `opDot` is deprecated. Use `alias this`
-runnable/xtest46.d(186): Deprecation: `opDot` is deprecated. Use `alias this`
 const(int)
 string[]
 double[]
@@ -137,10 +129,7 @@ struct T6
     S6 s;
     int b = 7;
 
-    S6* opDot() return
-    {
-        return &s;
-    }
+    alias s this;
 }
 
 void test6()
@@ -169,10 +158,7 @@ class C7
     S7 s;
     int b = 7;
 
-    S7* opDot()
-    {
-        return &s;
-    }
+    alias s this;
 }
 
 void test7()
@@ -5063,7 +5049,7 @@ class Bar6847 : Foo6847
 }
 
 /***************************************************/
-// http://d.puremagic.com/issues/show_bug.cgi?id=6488
+// https://issues.dlang.org/show_bug.cgi?id=6488
 
 struct TickDuration
 {
@@ -6727,14 +6713,14 @@ void test9477()
     static bool isEq (T1, T2)(T1 s1, T2 s2) { return s1 == s2; }
     static bool isNeq(T1, T2)(T1 s1, T2 s2) { return s1 != s2; }
 
-    // Must be outside the loop due to http://d.puremagic.com/issues/show_bug.cgi?id=9748
+    // Must be outside the loop due to https://issues.dlang.org/show_bug.cgi?id=9748
     int order;
-    // Must be outside the loop due to http://d.puremagic.com/issues/show_bug.cgi?id=9756
+    // Must be outside the loop due to https://issues.dlang.org/show_bug.cgi?id=9756
     auto checkOrder(bool dyn, uint expected)()
     {
         assert(order==expected);
         order++;
-        // Use temporary ("v") to work around http://d.puremagic.com/issues/show_bug.cgi?id=9402
+        // Use temporary ("v") to work around https://issues.dlang.org/show_bug.cgi?id=9402
         auto v = cast(Select9477!(dyn, string, char[1]))"a";
         return v;
     }
@@ -6742,7 +6728,7 @@ void test9477()
     foreach (b1; Tuple9477!(false, true))
         foreach (b2; Tuple9477!(false, true))
         {
-            version (D_PIC) {} else version (D_PIE) {}  else // Work around http://d.puremagic.com/issues/show_bug.cgi?id=9754
+            version (D_PIC) {} else version (D_PIE) {}  else // Work around https://issues.dlang.org/show_bug.cgi?id=9754
             {
                 assert( isEq (cast(Select9477!(b1, string, char[0]))"" , cast(Select9477!(b2, string, char[0]))""  ));
                 assert(!isNeq(cast(Select9477!(b1, string, char[0]))"" , cast(Select9477!(b2, string, char[0]))""  ));

@@ -1,9 +1,9 @@
 /**
  * Configures and initializes the backend.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/dmsc.d, _dmsc.d)
  * Documentation:  https://dlang.org/phobos/dmd_dmsc.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/dmsc.d
@@ -19,8 +19,8 @@ extern (C++):
 
 import dmd.globals;
 import dmd.dclass;
+import dmd.dmdparams;
 import dmd.dmodule;
-import dmd.mars;
 import dmd.mtype;
 import dmd.target;
 
@@ -40,6 +40,7 @@ extern (C) void out_config_init(
                         // false: dll or shared library (generate PIC code)
         bool trace,     // add profiling code
         bool nofloat,   // do not pull in floating point code
+        bool vasm,      // print generated assembler for each function
         bool verbose,   // verbose compile
         bool optimize,  // optimize code
         int symdebug,   // add symbolic debug information
@@ -103,34 +104,35 @@ void backend_init()
         exe = true;         // if writing out EXE file
 
     out_config_init(
-        (target.is64bit ? 64 : 32) | (target.mscoff ? 1 : 0),
+        (target.is64bit ? 64 : 32) | (target.objectFormat() == Target.ObjectFormat.coff ? 1 : 0),
         exe,
         false, //params.trace,
         params.nofloat,
+        driverParams.vasm,
         params.verbose,
         params.optimize,
         params.symdebug,
-        dmdParams.alwaysframe,
+        driverParams.alwaysframe,
         params.stackstomp,
         target.cpu >= CPU.avx2 ? 2 : target.cpu >= CPU.avx ? 1 : 0,
         params.pic,
         params.useModuleInfo && Module.moduleinfo,
         params.useTypeInfo && Type.dtypeinfo,
         params.useExceptions && ClassDeclaration.throwable,
-        dmdParams.dwarf,
+        driverParams.dwarf,
         global.versionString(),
         exfmt,
         params.addMain
     );
 
     out_config_debug(
-        dmdParams.debugb,
-        dmdParams.debugc,
-        dmdParams.debugf,
-        dmdParams.debugr,
+        driverParams.debugb,
+        driverParams.debugc,
+        driverParams.debugf,
+        driverParams.debugr,
         false,
-        dmdParams.debugx,
-        dmdParams.debugy
+        driverParams.debugx,
+        driverParams.debugy
     );
 }
 

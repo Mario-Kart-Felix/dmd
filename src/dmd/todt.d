@@ -2,9 +2,9 @@
  * Put initializers and objects created from CTFE into a `dt_t` data structure
  * so the backend puts them into the data segment.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/todt.d, _todt.d)
  * Documentation:  https://dlang.org/phobos/dmd_todt.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/todt.d
@@ -16,13 +16,13 @@ import core.stdc.stdio;
 import core.stdc.string;
 
 import dmd.root.array;
+import dmd.root.complex;
 import dmd.root.rmem;
 
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.astenums;
 import dmd.backend.type;
-import dmd.complex;
 import dmd.ctfeexpr;
 import dmd.declaration;
 import dmd.dclass;
@@ -272,10 +272,29 @@ extern (C++) void Expression_toDt(Expression e, ref DtBuilder dtb)
     {
         version (none)
         {
-            printf("Expression.toDt() %d\n", e.op);
+            printf("Expression.toDt() op = %d e = %s \n", e.op, e.toChars());
         }
         e.error("non-constant expression `%s`", e.toChars());
         dtb.nzeros(1);
+    }
+
+    void visitSlice(SliceExp e)
+    {
+        version (none)
+        {
+            printf("SliceExp.toDt() %d from %s to %s\n", e.op, e.e1.type.toChars(), e.type.toChars());
+        }
+        if (!e.lwr && !e.upr)
+            return Expression_toDt(e.e1, dtb);
+        if (auto strExp = e.e1.isStringExp())
+        {
+            auto lwr = e.lwr.isIntegerExp();
+            auto upr = e.upr.isIntegerExp();
+            if (lwr && upr && lwr.toInteger() == 0 && upr.toInteger() == strExp.len)
+                return Expression_toDt(e.e1, dtb);
+        }
+
+        nonConstExpError(e);
     }
 
     void visitCast(CastExp e)
@@ -654,6 +673,7 @@ extern (C++) void Expression_toDt(Expression e, ref DtBuilder dtb)
         case EXP.classReference: return visitClassReference(e.isClassReferenceExp());
         case EXP.typeid_:        return visitTypeid        (e.isTypeidExp());
         case EXP.assert_:        return visitNoreturn      (e);
+        case EXP.slice:          return visitSlice         (e.isSliceExp());
     }
 }
 
@@ -754,6 +774,7 @@ private void membersToDt(AggregateDeclaration ad, ref DtBuilder dtb,
         }
     }
     dtb.checkInitialized();
+    //printf("+dtb.length: %d\n", dtb.length);
 
     /* Order:
      *  { base class } or { __vptr, __monitor }
@@ -843,6 +864,7 @@ private void membersToDt(AggregateDeclaration ad, ref DtBuilder dtb,
     {
         if (bitOffset)
         {
+            //printf("finishInFlightBitField() offset %d bitOffset %d bitFieldSize %d\n", offset, bitOffset, bitFieldSize);
             assert(bitFieldSize);
             dtb.nbytes(bitFieldSize, cast(char*)&bitFieldValue);
             offset += bitFieldSize;
@@ -937,7 +959,7 @@ private void membersToDt(AggregateDeclaration ad, ref DtBuilder dtb,
         assert(offset <= vd.offset);
         if (offset < vd.offset)
             dtb.nzeros(vd.offset - offset);
-        //printf("vd: %s offset: %u, vd.offset: %u\n", vd.toChars(), offset, vd.offset);
+        //printf("offset: %u, vd: %s vd.offset: %u\n", offset, vd.toChars(), vd.offset);
 
         auto dtbx = DtBuilder(0);
         if (elements)
@@ -959,7 +981,7 @@ private void membersToDt(AggregateDeclaration ad, ref DtBuilder dtb,
             else
                 Expression_toDt(e, dtbx);    // convert e to an initializer dt
         }
-        else
+        else if (!bf)
         {
             if (Initializer init = vd._init)
             {
@@ -1001,12 +1023,13 @@ private void membersToDt(AggregateDeclaration ad, ref DtBuilder dtb,
 
     if (offset < ad.structsize)
         dtb.nzeros(ad.structsize - offset);
+    //printf("-dtb.length: %d\n", dtb.length);
 }
 
 
 /* ================================================================= */
 
-extern (C++) void Type_toDt(Type t, ref DtBuilder dtb)
+extern (C++) void Type_toDt(Type t, ref DtBuilder dtb, bool isCfile = false)
 {
     switch (t.ty)
     {
@@ -1023,7 +1046,7 @@ extern (C++) void Type_toDt(Type t, ref DtBuilder dtb)
             break;
 
         default:
-            Expression_toDt(t.defaultInit(Loc.initial), dtb);
+            Expression_toDt(t.defaultInit(Loc.initial, isCfile), dtb);
             break;
     }
 }

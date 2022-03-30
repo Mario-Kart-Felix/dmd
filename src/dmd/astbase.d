@@ -1,8 +1,8 @@
 /**
  * Defines AST nodes for the parsing stage.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/astbase.d, _astbase.d)
  * Documentation:  https://dlang.org/phobos/dmd_astbase.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/astbase.d
@@ -331,6 +331,10 @@ struct ASTBase
         {
             super(id);
         }
+        final extern (D) this(const ref Loc loc, Identifier ident)
+        {
+            super(loc, ident);
+        }
 
         override void accept(Visitor v)
         {
@@ -481,7 +485,6 @@ struct ASTBase
         enum AdrOnStackNone = ~0u;
         uint ctfeAdrOnStack;
         uint sequenceNumber;
-        __gshared uint nextSequenceNumber;
 
         final extern (D) this(const ref Loc loc, Type type, Identifier id, Initializer _init, StorageClass st = STC.undefined_)
         {
@@ -490,7 +493,6 @@ struct ASTBase
             this._init = _init;
             this.loc = loc;
             this.storage_class = st;
-            sequenceNumber = ++nextSequenceNumber;
             ctfeAdrOnStack = AdrOnStackNone;
         }
 
@@ -808,9 +810,9 @@ struct ASTBase
         PKG isPkgMod;
         uint tag;
 
-        final extern (D) this(Identifier ident)
+        final extern (D) this(const ref Loc loc, Identifier ident)
         {
-            super(ident);
+            super(loc, ident);
             this.isPkgMod = PKG.unknown;
             __gshared uint packageTag;
             this.tag = packageTag++;
@@ -1333,14 +1335,21 @@ struct ASTBase
         extern (C++) __gshared AggregateDeclaration moduleinfo;
 
         const FileName srcfile;
-        const(char)* arg;
+        const(char)[] arg;
+
+        extern (D) this(const ref Loc loc, const(char)[] filename, Identifier ident, int doDocComment, int doHdrGen)
+        {
+            super(loc, ident);
+            this.arg = filename;
+            srcfile = FileName(filename);
+        }
 
         extern (D) this(const(char)* filename, Identifier ident, int doDocComment, int doHdrGen)
         {
-            super(ident);
-            this.arg = filename;
-            srcfile = FileName(FileName.defaultExt(filename.toDString, mars_ext));
+            this(Loc.initial, filename.toDString, ident, doDocComment, doHdrGen);
         }
+
+        bool isRoot() { return false; }
 
         override void accept(Visitor v)
         {
@@ -1408,7 +1417,7 @@ struct ASTBase
 
             super(loc, id);
 
-            __gshared const(char)* msg = "only object.d can define this reserved class name";
+            static immutable msg = "only object.d can define this reserved class name";
 
             if (baseclasses)
             {
@@ -1437,103 +1446,103 @@ struct ASTBase
                     if (id == Id.TypeInfo)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.dtypeinfo = this;
                     }
                     if (id == Id.TypeInfo_Class)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoclass = this;
                     }
                     if (id == Id.TypeInfo_Interface)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfointerface = this;
                     }
                     if (id == Id.TypeInfo_Struct)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfostruct = this;
                     }
                     if (id == Id.TypeInfo_Pointer)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfopointer = this;
                     }
                     if (id == Id.TypeInfo_Array)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoarray = this;
                     }
                     if (id == Id.TypeInfo_StaticArray)
                     {
                         //if (!inObject)
-                        //    Type.typeinfostaticarray.error("%s", msg);
+                        //    Type.typeinfostaticarray.error("%s", msg.ptr);
                         Type.typeinfostaticarray = this;
                     }
                     if (id == Id.TypeInfo_AssociativeArray)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoassociativearray = this;
                     }
                     if (id == Id.TypeInfo_Enum)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoenum = this;
                     }
                     if (id == Id.TypeInfo_Function)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfofunction = this;
                     }
                     if (id == Id.TypeInfo_Delegate)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfodelegate = this;
                     }
                     if (id == Id.TypeInfo_Tuple)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfotypelist = this;
                     }
                     if (id == Id.TypeInfo_Const)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoconst = this;
                     }
                     if (id == Id.TypeInfo_Invariant)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoinvariant = this;
                     }
                     if (id == Id.TypeInfo_Shared)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfoshared = this;
                     }
                     if (id == Id.TypeInfo_Wild)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfowild = this;
                     }
                     if (id == Id.TypeInfo_Vector)
                     {
                         if (!inObject)
-                            error("%s", msg);
+                            error("%s", msg.ptr);
                         Type.typeinfovector = this;
                     }
                 }
@@ -1541,32 +1550,32 @@ struct ASTBase
                 if (id == Id.Object)
                 {
                     if (!inObject)
-                        error("%s", msg);
+                        error("%s", msg.ptr);
                     object = this;
                 }
 
                 if (id == Id.Throwable)
                 {
                     if (!inObject)
-                        error("%s", msg);
+                        error("%s", msg.ptr);
                     throwable = this;
                 }
                 if (id == Id.Exception)
                 {
                     if (!inObject)
-                        error("%s", msg);
+                        error("%s", msg.ptr);
                     exception = this;
                 }
                 if (id == Id.Error)
                 {
                     if (!inObject)
-                        error("%s", msg);
+                        error("%s", msg.ptr);
                     errorException = this;
                 }
                 if (id == Id.cpp_type_info_ptr)
                 {
                     if (!inObject)
-                        error("%s", msg);
+                        error("%s", msg.ptr);
                     cpp_type_info_ptr = this;
                 }
             }
@@ -2532,7 +2541,7 @@ struct ASTBase
         extern (C++) __gshared ClassDeclaration typeinfoshared;
         extern (C++) __gshared ClassDeclaration typeinfowild;
         extern (C++) __gshared StringTable!Type stringtable;
-        extern (C++) __gshared ubyte[TMAX] sizeTy = ()
+        extern (D) private static immutable ubyte[TMAX] sizeTy = ()
             {
                 ubyte[TMAX] sizeTy = __traits(classInstanceSize, TypeBasic);
                 sizeTy[Tsarray] = __traits(classInstanceSize, TypeSArray);
@@ -3877,9 +3886,9 @@ struct ASTBase
             this.trust = TRUST.default_;
             if (stc & STC.safe)
                 this.trust = TRUST.safe;
-            if (stc & STC.system)
+            else if (stc & STC.system)
                 this.trust = TRUST.system;
-            if (stc & STC.trusted)
+            else if (stc & STC.trusted)
                 this.trust = TRUST.trusted;
         }
 
@@ -4542,38 +4551,38 @@ struct ASTBase
                 break;
 
             case Tint8:
-                value = cast(d_int8)value;
+                value = cast(byte)value;
                 break;
 
             case Tchar:
             case Tuns8:
-                value = cast(d_uns8)value;
+                value = cast(ubyte)value;
                 break;
 
             case Tint16:
-                value = cast(d_int16)value;
+                value = cast(short)value;
                 break;
 
             case Twchar:
             case Tuns16:
-                value = cast(d_uns16)value;
+                value = cast(ushort)value;
                 break;
 
             case Tint32:
-                value = cast(d_int32)value;
+                value = cast(int)value;
                 break;
 
             case Tdchar:
             case Tuns32:
-                value = cast(d_uns32)value;
+                value = cast(uint)value;
                 break;
 
             case Tint64:
-                value = cast(d_int64)value;
+                value = cast(long)value;
                 break;
 
             case Tuns64:
-                value = cast(d_uns64)value;
+                value = cast(ulong)value;
                 break;
 
             case Tpointer:
@@ -4599,15 +4608,13 @@ struct ASTBase
     extern (C++) final class NewAnonClassExp : Expression
     {
         Expression thisexp;     // if !=null, 'this' for class being allocated
-        Expressions* newargs;   // Array of Expression's to call new operator
         ClassDeclaration cd;    // class being instantiated
         Expressions* arguments; // Array of Expression's to call class constructor
 
-        extern (D) this(const ref Loc loc, Expression thisexp, Expressions* newargs, ClassDeclaration cd, Expressions* arguments)
+        extern (D) this(const ref Loc loc, Expression thisexp, ClassDeclaration cd, Expressions* arguments)
         {
             super(loc, EXP.newAnonymousClass, __traits(classInstanceSize, NewAnonClassExp));
             this.thisexp = thisexp;
-            this.newargs = newargs;
             this.cd = cd;
             this.arguments = arguments;
         }
@@ -4790,15 +4797,13 @@ struct ASTBase
     extern (C++) class NewExp : Expression
     {
         Expression thisexp;         // if !=null, 'this' for class being allocated
-        Expressions* newargs;       // Array of Expression's to call new operator
         Type newtype;
         Expressions* arguments;     // Array of Expression's
 
-        extern (D) this(const ref Loc loc, Expression thisexp, Expressions* newargs, Type newtype, Expressions* arguments)
+        extern (D) this(const ref Loc loc, Expression thisexp, Type newtype, Expressions* arguments)
         {
             super(loc, EXP.new_, __traits(classInstanceSize, NewExp));
             this.thisexp = thisexp;
-            this.newargs = newargs;
             this.newtype = newtype;
             this.arguments = arguments;
         }
@@ -5411,6 +5416,25 @@ struct ASTBase
         {
             super(loc, EXP.assert_, __traits(classInstanceSize, AssertExp), e);
             this.msg = msg;
+        }
+
+        override void accept(Visitor v)
+        {
+            v.visit(this);
+        }
+    }
+
+    extern (C++) final class ThrowExp : UnaExp
+    {
+        extern (D) this(const ref Loc loc, Expression e)
+        {
+            super(loc, EXP.throw_, __traits(classInstanceSize, ThrowExp), e);
+            this.type = Type.tnoreturn;
+        }
+
+        override ThrowExp syntaxCopy()
+        {
+            return new ThrowExp(loc, e1.syntaxCopy());
         }
 
         override void accept(Visitor v)
@@ -6574,7 +6598,6 @@ struct ASTBase
             SCstring(STC.pure_, Token.toString(TOK.pure_)),
             SCstring(STC.ref_, Token.toString(TOK.ref_)),
             SCstring(STC.return_, Token.toString(TOK.return_)),
-            SCstring(STC.tls, "__thread"),
             SCstring(STC.gshared, Token.toString(TOK.gshared)),
             SCstring(STC.nogc, "@nogc"),
             SCstring(STC.live, "@live"),

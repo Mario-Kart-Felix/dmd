@@ -1,9 +1,9 @@
 /**
  * Convert an AST that went through all semantic phases into an object file.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/tocsym.d, _toobj.d)
  * Documentation:  https://dlang.org/phobos/dmd_toobj.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/toobj.d
@@ -254,9 +254,9 @@ void write_instance_pointers(Type type, Symbol *s, uint offset)
     if (!type.hasPointers())
         return;
 
-    Array!(d_uns64) data;
-    d_uns64 sz = getTypePointerBitmap(Loc.initial, type, &data);
-    if (sz == d_uns64.max)
+    Array!(ulong) data;
+    ulong sz = getTypePointerBitmap(Loc.initial, type, &data);
+    if (sz == ulong.max)
         return;
 
     const bytes_size_t = cast(size_t)Type.tsize_t.size(Loc.initial);
@@ -570,7 +570,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
                 return;
 
             Symbol *s = toSymbol(vd);
-            d_uns64 sz64 = vd.type.size(vd.loc);
+            const sz64 = vd.type.size(vd.loc);
             if (sz64 == SIZE_INVALID)
             {
                 vd.error("size overflow");
@@ -584,6 +584,11 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             Dsymbol parent = vd.toParent();
             s.Sclass = SCglobal;
+
+            /* Make C static functions SCstatic
+             */
+            if (vd.storage_class & STC.static_ && vd.isCsymbol())
+                s.Sclass = SCstatic;
 
             do
             {
@@ -627,7 +632,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             }
             else
             {
-                Type_toDt(vd.type, dtb);
+                Type_toDt(vd.type, dtb, vd.isCsymbol());
             }
             s.Sdt = dtb.finish();
 

@@ -1,9 +1,9 @@
 /**
  * Contains high-level interfaces for interacting with DMD as a library.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/id.d, _id.d)
  * Documentation:  https://dlang.org/phobos/dmd_frontend.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/frontend.d
@@ -166,6 +166,7 @@ application.
 void deinitializeDMD()
 {
     import dmd.dmodule : Module;
+    import dmd.dsymbol : Dsymbol;
     import dmd.expression : Expression;
     import dmd.globals : global;
     import dmd.id : Id;
@@ -183,6 +184,7 @@ void deinitializeDMD()
     target.deinitialize();
     Expression.deinitialize();
     Objc.deinitialize();
+    Dsymbol.deinitialize();
 }
 
 /**
@@ -394,20 +396,14 @@ Tuple!(Module, "module_", Diagnostics, "diagnostics") parseModule(AST = ASTCodeg
         m.read(Loc.initial);
     else
     {
-        File.ReadResult readResult = {
-            success: true,
-            buffer: FileBuffer(cast(ubyte[]) code.dup ~ '\0')
-        };
+        import dmd.root.filename : FileName;
 
-        if (m.loadSourceBuffer(Loc.initial, readResult))
-        {
-            import dmd.file_manager : FileManager;
-            import dmd.root.filename : FileName;
-            FileManager.fileManager.add(FileName(fileName), m.srcBuffer);
-        }
+        auto fb = new FileBuffer(cast(ubyte[]) code.dup ~ '\0');
+        global.fileManager.add(FileName(fileName), fb);
+        m.src = fb.data;
     }
 
-    m.parseModule!AST();
+    m = m.parseModule!AST();
 
     Diagnostics diagnostics = {
         errors: global.errors,
@@ -676,4 +672,3 @@ nothrow:
         return false;
     }
 }
-

@@ -2,9 +2,9 @@
  * Miscellaneous declarations, including typedef, alias, variable declarations including the
  * implicit this declaration, type tuples, ClassInfo, ModuleInfo and various TypeInfos.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/declaration.d, _declaration.d)
  * Documentation:  https://dlang.org/phobos/dmd_declaration.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/declaration.d
@@ -29,6 +29,7 @@ import dmd.errors;
 import dmd.expression;
 import dmd.func;
 import dmd.globals;
+import dmd.gluelayer;
 import dmd.id;
 import dmd.identifier;
 import dmd.init;
@@ -227,6 +228,8 @@ extern (C++) abstract class Declaration : Dsymbol
       enum wasRead    = 1; // set if AliasDeclaration was read
       enum ignoreRead = 2; // ignore any reads of AliasDeclaration
 
+    Symbol* isym;           // import version of csym
+
     // overridden symbol with pragma(mangle, "...")
     const(char)[] mangleOverride;
 
@@ -247,7 +250,7 @@ extern (C++) abstract class Declaration : Dsymbol
         return "declaration";
     }
 
-    override final d_uns64 size(const ref Loc loc)
+    override final uinteger_t size(const ref Loc loc)
     {
         assert(type);
         const sz = type.size();
@@ -289,7 +292,7 @@ extern (C++) abstract class Declaration : Dsymbol
                  * postblit. Print the first field that has
                  * a disabled postblit.
                  */
-                if (postblit.generated)
+                if (postblit.isGenerated())
                 {
                     auto sd = p.isStructDeclaration();
                     assert(sd);
@@ -331,7 +334,7 @@ extern (C++) abstract class Declaration : Dsymbol
 
         if (auto ctor = isCtorDeclaration())
         {
-            if (ctor.isCpCtor && ctor.generated)
+            if (ctor.isCpCtor && ctor.isGenerated())
             {
                 .error(loc, "Generating an `inout` copy constructor for `struct %s` failed, therefore instances of it are uncopyable", parent.toPrettyChars());
                 return true;
@@ -679,10 +682,12 @@ extern (C++) final class TupleDeclaration : Declaration
 }
 
 /***********************************************************
+ * https://dlang.org/spec/declaration.html#AliasDeclaration
  */
 extern (C++) final class AliasDeclaration : Declaration
 {
-    Dsymbol aliassym;
+    Dsymbol aliassym;   // alias ident = aliassym;
+
     Dsymbol overnext;   // next in overload list
     Dsymbol _import;    // !=null if unresolved internal alias for selective import
 
@@ -1048,7 +1053,6 @@ extern (C++) class VarDeclaration : Declaration
     uint endlinnum;                 // line number of end of scope that this var lives in
     uint offset;
     uint sequenceNumber;            // order the variables are declared
-    __gshared uint nextSequenceNumber;   // the counter for sequenceNumber
     structalign_t alignment;
 
     // When interpreting, these point to the value (NULL if value not determinable)
@@ -1065,9 +1069,8 @@ extern (C++) class VarDeclaration : Declaration
     // Both these mean the var is not rebindable once assigned,
     // and the destructor gets run when it goes out of scope
     bool onstack;                   // it is a class that was allocated on the stack
-    bool mynew;                     // it is a class new'd with custom operator new
 
-    byte canassign;                  // it can be assigned to
+    byte canassign;                 // it can be assigned to
     bool overlapped;                // if it is a field and has overlapping
     bool overlapUnsafe;             // if it is an overlapping field and the overlaps are unsafe
     bool doNotInferScope;           // do not infer 'scope' for this variable
@@ -1099,7 +1102,6 @@ extern (C++) class VarDeclaration : Declaration
         this._init = _init;
         ctfeAdrOnStack = AdrOnStackNone;
         this.storage_class = storage_class;
-        sequenceNumber = ++nextSequenceNumber;
     }
 
     static VarDeclaration create(const ref Loc loc, Type type, Identifier ident, Initializer _init, StorageClass storage_class = STC.undefined_)
@@ -1139,7 +1141,7 @@ extern (C++) class VarDeclaration : Declaration
 
         if (!isField())
             return;
-        assert(!(storage_class & (STC.static_ | STC.extern_ | STC.parameter | STC.tls)));
+        assert(!(storage_class & (STC.static_ | STC.extern_ | STC.parameter)));
 
         //printf("+VarDeclaration::setFieldOffset(ad = %s) %s\n", ad.toChars(), toChars());
 
@@ -1215,7 +1217,7 @@ extern (C++) class VarDeclaration : Declaration
 
     override final inout(AggregateDeclaration) isThis() inout
     {
-        if (!(storage_class & (STC.static_ | STC.extern_ | STC.manifest | STC.templateparameter | STC.tls | STC.gshared | STC.ctfe)))
+        if (!(storage_class & (STC.static_ | STC.extern_ | STC.manifest | STC.templateparameter | STC.gshared | STC.ctfe)))
         {
             /* The casting is necessary because `s = s.parent` is otherwise rejected
              */
@@ -1283,7 +1285,7 @@ extern (C++) class VarDeclaration : Declaration
                 error("forward referenced");
                 type = Type.terror;
             }
-            else if (storage_class & (STC.static_ | STC.extern_ | STC.tls | STC.gshared) ||
+            else if (storage_class & (STC.static_ | STC.extern_ | STC.gshared) ||
                 parent.isModule() || parent.isTemplateInstance() || parent.isNspace())
             {
                 assert(!isParameter() && !isResult());
@@ -1454,7 +1456,7 @@ extern (C++) class VarDeclaration : Declaration
                 //if (cd.isInterfaceDeclaration())
                 //    error("interface `%s` cannot be scope", cd.toChars());
 
-                if (mynew || onstack) // if any destructors
+                if (onstack) // if any destructors
                 {
                     // delete'ing C++ classes crashes (and delete is deprecated anyway)
                     if (cd.classKind == ClassKind.cpp)
@@ -1639,66 +1641,6 @@ extern (C++) class VarDeclaration : Declaration
     override void accept(Visitor v)
     {
         v.visit(this);
-    }
-
-    /**********************************
-     * Determine if `this` has a lifetime that lasts past
-     * the destruction of `v`
-     * Params:
-     *  v = variable to test against
-     * Returns:
-     *  true if it does
-     */
-    final bool enclosesLifetimeOf(VarDeclaration v) const pure
-    {
-        // VarDeclaration's with these STC's need special treatment
-        enum special = STC.temp | STC.foreach_;
-
-        // Sequence numbers work when there are no special VarDeclaration's involved
-        if (!((this.storage_class | v.storage_class) & special))
-        {
-            // FIXME: VarDeclaration's for parameters are created in semantic3, so
-            //        they will have a greater sequence number than local variables.
-            //        Hence reverse the result for mixed comparisons.
-            const exp = this.isParameter() == v.isParameter();
-
-            return (this.sequenceNumber < v.sequenceNumber) == exp;
-        }
-
-        // Assume that semantic produces temporaries according to their lifetime
-        // (It won't create a temporary before the actual content)
-        if ((this.storage_class & special) && (v.storage_class & special))
-            return this.sequenceNumber < v.sequenceNumber;
-
-        // Fall back to lexical order
-        assert(this.loc != Loc.initial);
-        assert(v.loc != Loc.initial);
-
-        if (this.loc.linnum != v.loc.linnum)
-            return this.loc.linnum < v.loc.linnum;
-
-        if (this.loc.charnum != v.loc.charnum)
-            return this.loc.charnum < v.loc.charnum;
-
-        // Default fallback
-        return this.sequenceNumber < v.sequenceNumber;
-    }
-
-    /***************************************
-     * Add variable to maybes[].
-     * When a maybescope variable `v` is assigned to a maybescope variable `this`,
-     * we cannot determine if `this` is actually scope until the semantic
-     * analysis for the function is completed. Thus, we save the data
-     * until then.
-     * Params:
-     *  v = an STC.maybescope variable that was assigned to `this`
-     */
-    final void addMaybe(VarDeclaration v)
-    {
-        //printf("add %s to %s's list of dependencies\n", v.toChars(), toChars());
-        if (!maybes)
-            maybes = new VarDeclarations();
-        maybes.push(v);
     }
 }
 

@@ -2,9 +2,9 @@
  * Top level code for the code generator.
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ *              Copyright (C) 2000-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cgcod.d, backend/cgcod.d)
  * Documentation:  https://dlang.org/phobos/dmd_backend_cgcod.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/backend/cgcod.d
@@ -34,6 +34,7 @@ import dmd.backend.code;
 import dmd.backend.cgcse;
 import dmd.backend.code_x86;
 import dmd.backend.codebuilder;
+import dmd.backend.disasm86;
 import dmd.backend.dlist;
 import dmd.backend.dvec;
 import dmd.backend.melf;
@@ -182,7 +183,7 @@ void codgen(Symbol *sfunc)
     cod3_initregs();
     allregs = ALLREGS;
     pass = PASSinitial;
-    Alloca.init();
+    Alloca.initialize();
     anyiasm = 0;
 
     if (config.ehmethod == EHmethod.EH_DWARF)
@@ -215,7 +216,7 @@ tryagain:
     retsym = null;
 
     cgstate.stackclean = 1;
-    cgstate.funcarg.init();
+    cgstate.funcarg.initialize();
     cgstate.funcargtos = ~0;
     cgstate.accessedTLS = false;
     STACKALIGN = TARGET_STACKALIGN;
@@ -507,7 +508,7 @@ tryagain:
     // Emit the generated code
     if (eecontext.EEcompile == 1)
     {
-        codout(sfunc.Sseg,eecontext.EEcode);
+        codout(sfunc.Sseg,eecontext.EEcode,null);
         code_free(eecontext.EEcode);
         version (SCPP)
         {
@@ -516,6 +517,9 @@ tryagain:
     }
     else
     {
+        __gshared Barray!ubyte disasmBuf;
+        disasmBuf.reset();
+
         for (block* b = startblock; b; b = b.Bnext)
         {
             if (b.BC == BCjmptab || b.BC == BCswitch)
@@ -568,7 +572,7 @@ tryagain:
                 }
             }
 
-            codout(sfunc.Sseg,b.Bcode);   // output code
+            codout(sfunc.Sseg,b.Bcode,configv.vasm ? &disasmBuf : null);   // output code
         }
         if (coffset != Offset(sfunc.Sseg))
         {
@@ -578,6 +582,9 @@ tryagain:
             assert(0);
         }
         sfunc.Ssize = Offset(sfunc.Sseg) - funcoffset;    // size of function
+
+        if (configv.vasm)
+            disassemble(disasmBuf[]);                   // disassemble the code
 
         static if (NTEXCEPTIONS || MARS)
         {
@@ -1259,10 +1266,10 @@ void stackoffsets(ref symtab_t symtab, bool estimate)
 {
     //printf("stackoffsets() %s\n", funcsym_p.Sident.ptr);
 
-    Para.init();        // parameter offset
-    Fast.init();        // SCfastpar offset
-    Auto.init();        // automatic & register offset
-    EEStack.init();     // for SCstack's
+    Para.initialize();        // parameter offset
+    Fast.initialize();        // SCfastpar offset
+    Auto.initialize();        // automatic & register offset
+    EEStack.initialize();     // for SCstack's
 
     // Set if doing optimization of auto layout
     bool doAutoOpt = estimate && config.flags4 & CFG4optimized;
@@ -3465,6 +3472,34 @@ void andregcon(con_t *pregconsave)
     regcon.params &= pregconsave.params;
     //printf("regcon.cse.mval&regcon.cse.mops = %s, regcon.cse.mops = %s\n",regm_str(regcon.cse.mval & regcon.cse.mops), regm_str(regcon.cse.mops));
     regcon.cse.mops &= regcon.cse.mval;
+}
+
+
+/**********************************************
+ * Disassemble the code instruction bytes
+ * Params:
+ *    code = array of instruction bytes
+ */
+@trusted
+private extern (D)
+void disassemble(ubyte[] code)
+{
+    printf("%s:\n", funcsym_p.Sident.ptr);
+    const model = I16 ? 16 : I32 ? 32 : 64;     // 16/32/64
+    size_t i = 0;
+    while (i < code.length)
+    {
+        printf("%04x:", cast(int)i);
+        uint pc;
+        const sz = dmd.backend.disasm86.calccodsize(code, cast(uint)i, pc, model);
+
+        void put(char c) { printf("%c", c); }
+
+        dmd.backend.disasm86.getopstring(&put, code, cast(uint)i, sz, model, model == 16, true,
+                null, null, null, null);
+        printf("\n");
+        i += sz;
+    }
 }
 
 }

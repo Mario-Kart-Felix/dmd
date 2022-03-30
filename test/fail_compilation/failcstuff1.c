@@ -1,7 +1,6 @@
 // check the expression parser
-/* TEST_OUTPUT
+/* TEST_OUTPUT:
 ---
-fail_compilation/failcstuff1.c(51): Error: attributes should be specified before the function definition
 fail_compilation/failcstuff1.c(100): Error: no members for `enum E21962`
 fail_compilation/failcstuff1.c(101): Error: no members for anonymous enum
 fail_compilation/failcstuff1.c(152): Error: `;` or `,` expected
@@ -45,6 +44,9 @@ fail_compilation/failcstuff1.c(503): Error: `=`, `;` or `,` expected to end decl
 fail_compilation/failcstuff1.c(504): Error: identifier or `(` expected
 fail_compilation/failcstuff1.c(504): Error: found `;` when expecting `)`
 fail_compilation/failcstuff1.c(505): Error: `=`, `;` or `,` expected to end declaration instead of `int`
+fail_compilation/failcstuff1.c(551): Error: missing comma or semicolon after declaration of `pluto`, found `p` instead
+fail_compilation/failcstuff1.c(601): Error: `=`, `;` or `,` expected to end declaration instead of `'s'`
+fail_compilation/failcstuff1.c(605): Error: invalid flag for line marker directive
 ---
 */
 
@@ -148,17 +150,16 @@ void test22102()
     int var2;
 }
 
-
 /****************************************************/
-
-/* TEST_OUTPUT:
----
-fail_compilation/failcstuff1.c(551): Error: missing comma or semicolon after declaration of `pluto`, found `p` instead
----
-*/
-
 #line 550
 
 int * pluto p;
 
+// https://issues.dlang.org/show_bug.cgi?id=22909
+#line 600
 
+char c22909 = u8's';
+
+/****************************************************/
+
+#650 "fail_compilation/failcstuff1.c" invalid

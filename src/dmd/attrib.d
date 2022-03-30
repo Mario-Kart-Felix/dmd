@@ -14,9 +14,9 @@
  * - Protection (`private`, `public`)
  * - Deprecated declarations (`@deprecated`)
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/attrib.d, _attrib.d)
  * Documentation:  https://dlang.org/phobos/dmd_attrib.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/attrib.d
@@ -43,6 +43,7 @@ import dmd.identifier;
 import dmd.mtype;
 import dmd.objc; // for objc.addSymbols
 import dmd.common.outbuffer;
+import dmd.root.array; // for each
 import dmd.target; // for target.systemLinkage
 import dmd.tokens;
 import dmd.visitor;
@@ -246,12 +247,12 @@ extern (C++) class StorageClassDeclaration : AttribDeclaration
          */
         if (stc & (STC.auto_ | STC.scope_ | STC.static_ | STC.extern_ | STC.manifest))
             scstc &= ~(STC.auto_ | STC.scope_ | STC.static_ | STC.extern_ | STC.manifest);
-        if (stc & (STC.auto_ | STC.scope_ | STC.static_ | STC.tls | STC.manifest | STC.gshared))
-            scstc &= ~(STC.auto_ | STC.scope_ | STC.static_ | STC.tls | STC.manifest | STC.gshared);
+        if (stc & (STC.auto_ | STC.scope_ | STC.static_ | STC.manifest | STC.gshared))
+            scstc &= ~(STC.auto_ | STC.scope_ | STC.static_ | STC.manifest | STC.gshared);
         if (stc & (STC.const_ | STC.immutable_ | STC.manifest))
             scstc &= ~(STC.const_ | STC.immutable_ | STC.manifest);
-        if (stc & (STC.gshared | STC.shared_ | STC.tls))
-            scstc &= ~(STC.gshared | STC.shared_ | STC.tls);
+        if (stc & (STC.gshared | STC.shared_))
+            scstc &= ~(STC.gshared | STC.shared_);
         if (stc & (STC.safe | STC.trusted | STC.system))
             scstc &= ~(STC.safe | STC.trusted | STC.system);
         scstc |= stc;
@@ -1518,4 +1519,61 @@ extern (C++) final class UserAttributeDeclaration : AttribDeclaration
             }
         }
     }
+}
+
+/**
+ * Returns `true` if the given symbol is a symbol declared in
+ * `core.attribute` and has the given identifier.
+ *
+ * This is used to determine if a symbol is a UDA declared in
+ * `core.attribute`.
+ *
+ * Params:
+ *  sym = the symbol to check
+ *  ident = the name of the expected UDA
+ */
+bool isCoreUda(Dsymbol sym, Identifier ident)
+{
+    if (sym.ident != ident || !sym.parent)
+        return false;
+
+    auto _module = sym.parent.isModule();
+    return _module && _module.isCoreModule(Id.attribute);
+}
+
+/**
+ * Iterates the UDAs attached to the given symbol.
+ *
+ * If `dg` returns `!= 0`, it will stop the iteration and return that
+ * value, otherwise it will return 0.
+ *
+ * Params:
+ *  sym = the symbol to get the UDAs from
+ *  sc = scope to use for semantic analysis of UDAs
+ *  dg = called once for each UDA. If `dg` returns `!= 0`, it will stop the
+ *      iteration and return that value, otherwise it will return `0`.
+ */
+int foreachUda(Dsymbol sym, Scope* sc, int delegate(Expression) dg)
+{
+    if (!sym.userAttribDecl)
+        return 0;
+
+    auto udas = sym.userAttribDecl.getAttributes();
+    arrayExpressionSemantic(udas, sc, true);
+
+    return udas.each!((uda) {
+        if (!uda.isTupleExp())
+            return 0;
+
+        auto exps = uda.isTupleExp().exps;
+
+        return exps.each!((e) {
+            assert(e);
+
+            if (auto result = dg(e))
+                return result;
+
+            return 0;
+        });
+    });
 }

@@ -1,9 +1,9 @@
 /**
  * Stores command line options and contains other miscellaneous declarations.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/globals.d, _globals.d)
  * Documentation:  https://dlang.org/phobos/dmd_globals.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/globals.d
@@ -15,6 +15,7 @@ import core.stdc.stdint;
 import dmd.root.array;
 import dmd.root.filename;
 import dmd.common.outbuffer;
+import dmd.file_manager;
 import dmd.identifier;
 
 /// Defines a setting for how compiler warnings and deprecations are handled
@@ -126,7 +127,7 @@ extern (C++) struct Param
     bool stackstomp;            // add stack stomping code
     bool useUnitTests;          // generate unittest code
     bool useInline = false;     // inline expand functions
-    FeatureState useDIP25;  // implement http://wiki.dlang.org/DIP25
+    FeatureState useDIP25;  // implement https://wiki.dlang.org/DIP25
     FeatureState useDIP1000; // implement https://dlang.org/spec/memory-safe-d.html#scope-return-params
     bool useDIP1021;        // implement https://github.com/dlang/DIPs/blob/master/DIPs/accepted/DIP1021.md
     bool release;           // build release version
@@ -161,11 +162,11 @@ extern (C++) struct Param
     FeatureState dtorFields; // destruct fields of partially constructed objects
                             // https://issues.dlang.org/show_bug.cgi?id=14246
     bool fieldwise;         // do struct equality testing field-wise rather than by memcmp()
-    bool rvalueRefParam;    // allow rvalues to be arguments to ref parameters
-                            // http://dconf.org/2019/talks/alexandrescu.html
-                            // https://gist.github.com/andralex/e5405a5d773f07f73196c05f8339435a
-                            // https://digitalmars.com/d/archives/digitalmars/D/Binding_rvalues_to_ref_parameters_redux_325087.html
-                            // Implementation: https://github.com/dlang/dmd/pull/9817
+    FeatureState rvalueRefParam; // allow rvalues to be arguments to ref parameters
+                                 // https://dconf.org/2019/talks/alexandrescu.html
+                                 // https://gist.github.com/andralex/e5405a5d773f07f73196c05f8339435a
+                                 // https://digitalmars.com/d/archives/digitalmars/D/Binding_rvalues_to_ref_parameters_redux_325087.html
+                                 // Implementation: https://github.com/dlang/dmd/pull/9817
 
     CppStdRevision cplusplus = CppStdRevision.cpp11;    // version of C++ standard to support
 
@@ -303,7 +304,7 @@ extern (C++) struct Global
 {
     const(char)[] inifilename; /// filename of configuration file as given by `-conf=`, or default value
 
-    string copyright = "Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved";
+    string copyright = "Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved";
     string written = "written by Walter Bright";
 
     Array!(const(char)*)* path;         /// Array of char*'s which form the import lookup path
@@ -327,6 +328,10 @@ extern (C++) struct Global
     Array!Identifier* debugids;   /// command line debug versions and predefined versions
 
     bool hasMainFunction; /// Whether a main function has already been compiled in (for -main switch)
+    uint varSequenceNumber = 1; /// Relative lifetime of `VarDeclaration` within a function, used for `scope` checks
+
+    /// Cache files read from disk
+    FileManager fileManager;
 
     enum recursionLimit = 500; /// number of recursive template expansions before abort
 
@@ -382,6 +387,7 @@ extern (C++) struct Global
 
     extern (C++) void _init()
     {
+        this.fileManager = new FileManager();
         version (MARS)
         {
             vendor = "Digital Mars D";
@@ -484,15 +490,6 @@ alias dinteger_t = ulong;
 // Signed and unsigned variants
 alias sinteger_t = long;
 alias uinteger_t = ulong;
-
-alias d_int8 = int8_t;
-alias d_uns8 = uint8_t;
-alias d_int16 = int16_t;
-alias d_uns16 = uint16_t;
-alias d_int32 = int32_t;
-alias d_uns32 = uint32_t;
-alias d_int64 = int64_t;
-alias d_uns64 = uint64_t;
 
 version (DMDLIB)
 {
@@ -613,49 +610,6 @@ nothrow:
         return filename !is null;
     }
 }
-
-/// A linkage attribute as defined by `extern(XXX)`
-///
-/// https://dlang.org/spec/attribute.html#linkage
-enum LINK : ubyte
-{
-    default_,
-    d,
-    c,
-    cpp,
-    windows,
-    objc,
-    system,
-}
-
-/// Whether to mangle an external aggregate as a struct or class, as set by `extern(C++, struct)`
-enum CPPMANGLE : ubyte
-{
-    def,      /// default
-    asStruct, /// `extern(C++, struct)`
-    asClass,  /// `extern(C++, class)`
-}
-
-/// Function match levels
-///
-/// https://dlang.org/spec/function.html#function-overloading
-enum MATCH : int
-{
-    nomatch,   /// no match
-    convert,   /// match with conversions
-    constant,  /// match with conversion to const
-    exact,     /// exact match
-}
-
-/// Inline setting as defined by `pragma(inline, XXX)`
-enum PINLINE : ubyte
-{
-    default_, /// as specified on the command line
-    never,    /// never inline
-    always,   /// always inline
-}
-
-alias StorageClass = uinteger_t;
 
 /// Collection of global state
 extern (C++) __gshared Global global;

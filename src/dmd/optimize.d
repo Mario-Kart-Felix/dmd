@@ -1,9 +1,9 @@
 /**
  * Perform constant folding.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/optimize.d, _optimize.d)
  * Documentation:  https://dlang.org/phobos/dmd_optimize.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/optimize.d
@@ -26,6 +26,7 @@ import dmd.expressionsem;
 import dmd.globals;
 import dmd.init;
 import dmd.mtype;
+import dmd.printast;
 import dmd.root.ctfloat;
 import dmd.sideeffect;
 import dmd.tokens;
@@ -220,7 +221,7 @@ package void setLengthVarIfKnown(VarDeclaration lengthVar, Expression arr)
         return;
     if (lengthVar._init && !lengthVar._init.isVoidInitializer())
         return; // we have previously calculated the length
-    d_uns64 len;
+    dinteger_t len;
     if (auto se = arr.isStringExp())
         len = se.len;
     else if (auto ale = arr.isArrayLiteralExp())
@@ -252,7 +253,7 @@ package void setLengthVarIfKnown(VarDeclaration lengthVar, Type type)
     auto tsa = type.toBasetype().isTypeSArray();
     if (!tsa)
         return; // we don't know the length yet
-    d_uns64 len = tsa.dim.toInteger();
+    const len = tsa.dim.toInteger();
     Expression dollar = new IntegerExp(Loc.initial, len, Type.tsize_t);
     lengthVar._init = new ExpInitializer(Loc.initial, dollar);
     lengthVar.storage_class |= STC.static_ | STC.const_;
@@ -270,6 +271,7 @@ package void setLengthVarIfKnown(VarDeclaration lengthVar, Type type)
  */
 Expression Expression_optimize(Expression e, int result, bool keepLvalue)
 {
+    //printf("Expression_optimize() %s\n", e.toChars());
     Expression ret = e;
 
     void error()
@@ -336,9 +338,9 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
     void visitTuple(TupleExp e)
     {
         expOptimize(e.e0, WANTvalue);
-        for (size_t i = 0; i < e.exps.dim; i++)
+        foreach (ref ex; (*e.exps)[])
         {
-            expOptimize((*e.exps)[i], WANTvalue);
+            expOptimize(ex, WANTvalue);
         }
     }
 
@@ -347,9 +349,9 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         if (e.elements)
         {
             expOptimize(e.basis, result & WANTexpand);
-            for (size_t i = 0; i < e.elements.dim; i++)
+            foreach (ref ex; (*e.elements)[])
             {
-                expOptimize((*e.elements)[i], result & WANTexpand);
+                expOptimize(ex, result & WANTexpand);
             }
         }
     }
@@ -357,9 +359,9 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
     void visitAssocArrayLiteral(AssocArrayLiteralExp e)
     {
         assert(e.keys.dim == e.values.dim);
-        for (size_t i = 0; i < e.keys.dim; i++)
+        foreach (i, ref ekey; (*e.keys)[])
         {
-            expOptimize((*e.keys)[i], result & WANTexpand);
+            expOptimize(ekey, result & WANTexpand);
             expOptimize((*e.values)[i], result & WANTexpand);
         }
     }
@@ -372,9 +374,9 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         e.stageflags |= stageOptimize;
         if (e.elements)
         {
-            for (size_t i = 0; i < e.elements.dim; i++)
+            foreach (ref ex; (*e.elements)[])
             {
-                expOptimize((*e.elements)[i], result & WANTexpand);
+                expOptimize(ex, result & WANTexpand);
             }
         }
         e.stageflags = old;
@@ -459,6 +461,83 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
                 return;
             }
         }
+        if (e.e1.isDotVarExp())
+        {
+            /******************************
+             * Run down the left side of the a.b.c expression to determine the
+             * leftmost variable being addressed (`a`), and accumulate the offsets of the `.b` and `.c`.
+             * Params:
+             *      e = the DotVarExp or VarExp
+             *      var = set to the VarExp at the end, or null if doesn't end in VarExp
+             *      eint = set to the IntegerExp at the end, or null if doesn't end in IntegerExp
+             *      offset = accumulation of all the .var offsets encountered
+             * Returns: true on error
+             */
+            static bool getVarAndOffset(Expression e, out VarDeclaration var, out IntegerExp eint, ref uint offset)
+            {
+                if (e.type.size() == SIZE_INVALID)  // trigger computation of v.offset
+                    return true;
+
+                if (auto dve = e.isDotVarExp())
+                {
+                    auto v = dve.var.isVarDeclaration();
+                    if (!v || !v.isField() || v.isBitFieldDeclaration())
+                        return false;
+
+                    if (getVarAndOffset(dve.e1, var, eint, offset))
+                        return true;
+                    offset += v.offset;
+                }
+                else if (auto ve = e.isVarExp())
+                {
+                    if (!ve.var.isReference() &&
+                        !ve.var.isImportedSymbol() &&
+                        ve.var.isDataseg() &&
+                        ve.var.isCsymbol())
+                    {
+                        var = ve.var.isVarDeclaration();
+                    }
+                }
+                else if (auto ep = e.isPtrExp())
+                {
+                    if (auto ei = ep.e1.isIntegerExp())
+                    {
+                        eint = ei;
+                    }
+                    else if (auto se = ep.e1.isSymOffExp())
+                    {
+                        if (!se.var.isReference() &&
+                            !se.var.isImportedSymbol() &&
+                            se.var.isDataseg())
+                        {
+                            var = se.var.isVarDeclaration();
+                            offset += se.offset;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            uint offset;
+            VarDeclaration var;
+            IntegerExp eint;
+            if (getVarAndOffset(e.e1, var, eint, offset))
+            {
+                ret = ErrorExp.get();
+                return;
+            }
+            if (var)
+            {
+                ret = new SymOffExp(e.loc, var, offset, false);
+                ret.type = e.type;
+                return;
+            }
+            if (eint)
+            {
+                ret = new IntegerExp(e.loc, eint.toInteger() + offset, e.type);
+                return;
+            }
+        }
         if (auto ae = e.e1.isIndexExp())
         {
             // Convert &array[n] to &array+n
@@ -472,8 +551,13 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
                     sinteger_t dim = ts.dim.toInteger();
                     if (index < 0 || index >= dim)
                     {
-                        e.error("array index %lld is out of bounds `[0..%lld]`", index, dim);
-                        return error();
+                        /* 0 for C static arrays means size is unknown, no need to check
+                         */
+                        if (!(dim == 0 && ve.var.isCsymbol()))
+                        {
+                            e.error("array index %lld is out of bounds `[0..%lld]`", index, dim);
+                            return error();
+                        }
                     }
 
                     import core.checkedint : mulu;
@@ -576,18 +660,11 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
     {
         expOptimize(e.thisexp, WANTvalue);
         // Optimize parameters
-        if (e.newargs)
-        {
-            for (size_t i = 0; i < e.newargs.dim; i++)
-            {
-                expOptimize((*e.newargs)[i], WANTvalue);
-            }
-        }
         if (e.arguments)
         {
-            for (size_t i = 0; i < e.arguments.dim; i++)
+            foreach (ref arg; (*e.arguments)[])
             {
-                expOptimize((*e.arguments)[i], WANTvalue);
+                expOptimize(arg, WANTvalue);
             }
         }
     }
@@ -601,16 +678,16 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         if (e.arguments)
         {
             Type t1 = e.e1.type.toBasetype();
-            if (t1.ty == Tdelegate)
-                t1 = t1.nextOf();
+            if (auto td = t1.isTypeDelegate())
+                t1 = td.next;
             // t1 can apparently be void for __ArrayDtor(T) calls
             if (auto tf = t1.isTypeFunction())
             {
-                for (size_t i = 0; i < e.arguments.dim; i++)
+                foreach (i, ref arg; (*e.arguments)[])
                 {
                     Parameter p = tf.parameterList[i];
                     bool keep = p && p.isReference();
-                    expOptimize((*e.arguments)[i], WANTvalue, keep);
+                    expOptimize(arg, WANTvalue, keep);
                 }
             }
         }
@@ -657,14 +734,17 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
             }
         }
 
+        // Returning e.e1 with changing its type
+        void returnE_e1()
+        {
+            ret = (e1old == e.e1 ? e.e1.copy() : e.e1);
+            ret.type = e.type;
+        }
+
         if (e.e1.op == EXP.structLiteral && e.e1.type.implicitConvTo(e.type) >= MATCH.constant)
         {
             //printf(" returning2 %s\n", e.e1.toChars());
-        L1:
-            // Returning e1 with changing its type
-            ret = (e1old == e.e1 ? e.e1.copy() : e.e1);
-            ret.type = e.type;
-            return;
+            return returnE_e1();
         }
         /* The first test here is to prevent infinite loops
          */
@@ -676,7 +756,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         if (e.e1.op == EXP.null_ && (e.type.ty == Tpointer || e.type.ty == Tclass || e.type.ty == Tarray))
         {
             //printf(" returning3 %s\n", e.e1.toChars());
-            goto L1;
+            return returnE_e1();
         }
         if (e.type.ty == Tclass && e.e1.type.ty == Tclass)
         {
@@ -688,7 +768,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
             if (cdfrom.errors || cdto.errors)
                 return error();
             if (cdto == ClassDeclaration.object && !cdfrom.isInterfaceDeclaration())
-                goto L1;    // can always convert a class to Object
+                return returnE_e1();    // can always convert a class to Object
             // Need to determine correct offset before optimizing away the cast.
             // https://issues.dlang.org/show_bug.cgi?id=16980
             cdfrom.size(e.loc);
@@ -698,13 +778,13 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
             if (cdto.isBaseOf(cdfrom, &offset) && offset == 0)
             {
                 //printf(" returning4 %s\n", e.e1.toChars());
-                goto L1;
+                return returnE_e1();
             }
         }
         if (e.e1.type.mutableOf().unSharedOf().equals(e.to.mutableOf().unSharedOf()))
         {
             //printf(" returning5 %s\n", e.e1.toChars());
-            goto L1;
+            return returnE_e1();
         }
         if (e.e1.isConst())
         {
@@ -719,7 +799,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
                         return error();
 
                     if (esz == e1sz)
-                        goto L1;
+                        return returnE_e1();
                 }
                 return;
             }
@@ -744,7 +824,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
             if (e.e2.isConst() == 1)
             {
                 sinteger_t i2 = e.e2.toInteger();
-                d_uns64 sz = e.e1.type.size(e.e1.loc);
+                uinteger_t sz = e.e1.type.size(e.e1.loc);
                 assert(sz != SIZE_INVALID);
                 sz *= 8;
                 if (i2 < 0 || i2 >= sz)
@@ -780,6 +860,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
 
     void visitMin(MinExp e)
     {
+        //printf("MinExp::optimize(%s)\n", e.toChars());
         if (binOptimize(e, result))
             return;
         if (e.e1.isConst() && e.e2.isConst())
@@ -829,7 +910,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         if (e.e2.isConst() == 1)
         {
             sinteger_t i2 = e.e2.toInteger();
-            d_uns64 sz = e.e1.type.size(e.e1.loc);
+            uinteger_t sz = e.e1.type.size(e.e1.loc);
             assert(sz != SIZE_INVALID);
             sz *= 8;
             if (i2 < 0 || i2 >= sz)
@@ -1002,7 +1083,7 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
         // Don't optimize to an array literal element directly in case an lvalue is requested
         if (keepLvalue && ex.op == EXP.arrayLiteral)
             return;
-        ret = Index(e.type, ex, e.e2).copy();
+        ret = Index(e.type, ex, e.e2, e.indexIsInBounds).copy();
         if (CTFEExp.isCantExp(ret) || (!ret.isErrorExp() && keepLvalue && !ret.isLvalue()))
             ret = e;
     }
@@ -1075,8 +1156,8 @@ Expression Expression_optimize(Expression e, int result, bool keepLvalue)
             const e1Opt = e.e1.toBool();
             if (e.e2.isConst())
             {
-                bool n1 = e1Opt.hasValue(true);
-                bool n2 = e.e2.toBool().hasValue(true);
+                bool n1 = e1Opt.get();
+                bool n2 = e.e2.toBool().get();
                 ret = new IntegerExp(e.loc, oror ? (n1 || n2) : (n1 && n2), e.type);
             }
             else if (e1Opt.hasValue(!oror))

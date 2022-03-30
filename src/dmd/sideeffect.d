@@ -1,9 +1,9 @@
 /**
  * Find side-effects of expressions.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/sideeffect.d, _sideeffect.d)
  * Documentation:  https://dlang.org/phobos/dmd_sideeffect.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/sideeffect.d
@@ -94,8 +94,9 @@ extern (C++) bool hasSideEffect(Expression e, bool assumeImpureCalls = false)
  * Determine if the call of f, or function type or delegate type t1, has any side effects.
  * Returns:
  *      0   has any side effects
- *      1   nothrow + constant purity
- *      2   nothrow + strong purity
+ *      1   nothrow + strongly pure
+ *      2   nothrow + strongly pure + only immutable indirections in the return
+ *          type
  */
 int callSideEffectLevel(FuncDeclaration f)
 {
@@ -106,15 +107,18 @@ int callSideEffectLevel(FuncDeclaration f)
         return 0;
     assert(f.type.ty == Tfunction);
     TypeFunction tf = cast(TypeFunction)f.type;
-    if (tf.isnothrow)
+    if (!tf.isnothrow)
+        return 0;
+    final switch (f.isPure())
     {
-        PURE purity = f.isPure();
-        if (purity == PURE.strong)
-            return 2;
-        if (purity == PURE.const_)
-            return 1;
+    case PURE.impure:
+    case PURE.fwdref:
+    case PURE.weak:
+        return 0;
+
+    case PURE.const_:
+        return mutabilityOfType(tf.isref, tf.next) == 2 ? 2 : 1;
     }
-    return 0;
 }
 
 int callSideEffectLevel(Type t)
@@ -141,10 +145,9 @@ int callSideEffectLevel(Type t)
             purity = PURE.const_;
     }
 
-    if (purity == PURE.strong)
-        return 2;
     if (purity == PURE.const_)
-        return 1;
+        return mutabilityOfType(tf.isref, tf.next) == 2 ? 2 : 1;
+
     return 0;
 }
 
@@ -178,6 +181,7 @@ private bool lambdaHasSideEffect(Expression e, bool assumeImpureCalls = false)
     case EXP.remove:
     case EXP.assert_:
     case EXP.halt:
+    case EXP.throw_:
     case EXP.delete_:
     case EXP.new_:
     case EXP.newAnonymousClass:

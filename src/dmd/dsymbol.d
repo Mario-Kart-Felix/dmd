@@ -1,9 +1,9 @@
 /**
  * The base class for a D symbol, which can be a module, variable, function, enum, etc.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/dsymbol.d, _dsymbol.d)
  * Documentation:  https://dlang.org/phobos/dmd_dsymbol.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/dsymbol.d
@@ -51,6 +51,7 @@ import dmd.root.rootobject;
 import dmd.root.speller;
 import dmd.root.string;
 import dmd.statement;
+import dmd.staticassert;
 import dmd.tokens;
 import dmd.visitor;
 
@@ -189,7 +190,7 @@ struct Visibility
 
 enum PASS : ubyte
 {
-    init,           // initial state
+    initial,        // initial state
     semantic,       // semantic() started
     semanticdone,   // semantic() done
     semantic2,      // semantic2() started
@@ -244,21 +245,15 @@ extern (C++) class Dsymbol : ASTNode
     /// C++ namespace this symbol belongs to
     CPPNamespaceDeclaration cppnamespace;
     Symbol* csym;           // symbol for code generator
-    Symbol* isym;           // import version of csym
-    const(char)* comment;   // documentation comment for this Dsymbol
     const Loc loc;          // where defined
     Scope* _scope;          // !=null means context to use for semantic()
     const(char)* prettystring;  // cached value of toPrettyChars()
     bool errors;            // this symbol failed to pass semantic()
-    PASS semanticRun = PASS.init;
+    PASS semanticRun = PASS.initial;
     ushort localNum;        /// perturb mangled name to avoid collisions with those in FuncDeclaration.localsymtab
 
     DeprecatedDeclaration depdecl;           // customized deprecation message
     UserAttributeDeclaration userAttribDecl;    // user defined attributes
-
-    // !=null means there's a ddoc unittest associated with this symbol
-    // (only use this with ddoc)
-    UnitTestDeclaration ddocUnittest;
 
     final extern (D) this()
     {
@@ -462,6 +457,18 @@ extern (C++) class Dsymbol : ASTNode
         return null;
     }
 
+    /**************************************
+     * Does this Dsymbol come from a C file?
+     * Returns:
+     *  true if it does
+     */
+     final bool isCsymbol()
+     {
+        if (Module m = getModule())
+            return m.filetype == FileType.c;
+        return false;
+    }
+
     /**********************************
      * Determine which Module a Dsymbol is in, as far as access rights go.
      */
@@ -614,7 +621,7 @@ extern (C++) class Dsymbol : ASTNode
         static bool has2This(Dsymbol s)
         {
             if (auto f = s.isFuncDeclaration())
-                return f.isThis2;
+                return f.hasDualContext();
             if (auto ad = s.isAggregateDeclaration())
                 return ad.vthis2 !is null;
             return false;
@@ -795,7 +802,7 @@ extern (C++) class Dsymbol : ASTNode
             Dsymbol s2 = sds.symtabLookup(this,ident);
 
             // If using C tag/prototype/forward declaration rules
-            if (sc.flags & SCOPE.Cfile)
+            if (sc.flags & SCOPE.Cfile && !this.isImport())
             {
                 if (handleTagSymbols(*sc, this, s2, sds))
                     return;
@@ -965,7 +972,7 @@ extern (C++) class Dsymbol : ASTNode
      * Returns:
      *  SIZE_INVALID when the size cannot be determined
      */
-    d_uns64 size(const ref Loc loc)
+    uinteger_t size(const ref Loc loc)
     {
         error("Dsymbol `%s` has no size", toChars());
         return SIZE_INVALID;
@@ -1198,16 +1205,64 @@ extern (C++) class Dsymbol : ASTNode
      */
     void addComment(const(char)* comment)
     {
-        //if (comment)
-        //    printf("adding comment '%s' to symbol %p '%s'\n", comment, this, toChars());
-        if (!this.comment)
-            this.comment = comment;
-        else if (comment && strcmp(cast(char*)comment, cast(char*)this.comment) != 0)
+        if (!comment || !*comment)
+            return;
+
+        //printf("addComment '%s' to Dsymbol %p '%s'\n", comment, this, toChars());
+        void* h = cast(void*)this;      // just the pointer is the key
+        auto p = h in commentHashTable;
+        if (!p)
+        {
+            commentHashTable[h] = comment;
+            return;
+        }
+        if (strcmp(*p, comment) != 0)
         {
             // Concatenate the two
-            this.comment = Lexer.combineComments(this.comment.toDString(), comment.toDString(), true);
+            *p = Lexer.combineComments((*p).toDString(), comment.toDString(), true);
         }
     }
+
+    /// get documentation comment for this Dsymbol
+    final const(char)* comment()
+    {
+        //printf("getcomment: %p '%s'\n", this, this.toChars());
+        if (auto p = cast(void*)this in commentHashTable)
+        {
+            //printf("comment: '%s'\n", *p);
+            return *p;
+        }
+        return null;
+    }
+
+    /* Shell around addComment() to avoid disruption for the moment */
+    final void comment(const(char)* comment) { addComment(comment); }
+
+    private extern (D) __gshared const(char)*[void*] commentHashTable;
+
+
+    /**********************************
+     * Get ddoc unittest associated with this symbol.
+     * (only use this with ddoc)
+     * Returns: ddoc unittest, null if none
+     */
+    final UnitTestDeclaration ddocUnittest()
+    {
+        if (auto p = cast(void*)this in ddocUnittestHashTable)
+            return *p;
+        return null;
+    }
+
+    /**********************************
+     * Set ddoc unittest associated with this symbol.
+     */
+    final void ddocUnittest(UnitTestDeclaration utd)
+    {
+        ddocUnittestHashTable[cast(void*)this] = utd;
+    }
+
+    private extern (D) __gshared UnitTestDeclaration[void*] ddocUnittestHashTable;
+
 
     /****************************************
      * Returns true if this symbol is defined in a non-root module without instantiation.
@@ -1229,6 +1284,18 @@ extern (C++) class Dsymbol : ASTNode
             }
         }
         return false;
+    }
+
+    /**
+     * Deinitializes the global state of the compiler.
+     *
+     * This can be used to restore the state set by `_init` to its original
+     * state.
+     */
+    static void deinitialize()
+    {
+        commentHashTable = commentHashTable.init;
+        ddocUnittestHashTable = ddocUnittestHashTable.init;
     }
 
     /************
@@ -1290,9 +1357,10 @@ extern (C++) class Dsymbol : ASTNode
     inout(AttribDeclaration)           isAttribDeclaration()           inout { return null; }
     inout(AnonDeclaration)             isAnonDeclaration()             inout { return null; }
     inout(CPPNamespaceDeclaration)     isCPPNamespaceDeclaration()     inout { return null; }
-    inout(VisibilityDeclaration)             isVisibilityDeclaration()             inout { return null; }
+    inout(VisibilityDeclaration)       isVisibilityDeclaration()       inout { return null; }
     inout(OverloadSet)                 isOverloadSet()                 inout { return null; }
     inout(CompileDeclaration)          isCompileDeclaration()          inout { return null; }
+    inout(StaticAssert)                isStaticAssert()                inout { return null; }
 }
 
 /***********************************************************
@@ -1783,7 +1851,7 @@ extern (C++) final class WithScopeSymbol : ScopeDsymbol
         // Acts as proxy to the with class declaration
         Dsymbol s = null;
         Expression eold = null;
-        for (Expression e = withstate.exp; e != eold; e = resolveAliasThis(_scope, e))
+        for (Expression e = withstate.exp; e && e != eold; e = resolveAliasThis(_scope, e, true))
         {
             if (e.op == EXP.scope_)
             {
@@ -2330,7 +2398,7 @@ extern (C++) final class DsymbolTable : RootObject
 Dsymbol handleTagSymbols(ref Scope sc, Dsymbol s, Dsymbol s2, ScopeDsymbol sds)
 {
     enum log = false;
-    if (log) printf("handleTagSymbols('%s')\n", s.toChars());
+    if (log) printf("handleTagSymbols('%s') add %p existing %p\n", s.toChars(), s, s2);
     auto sd = s.isScopeDsymbol(); // new declaration
     auto sd2 = s2.isScopeDsymbol(); // existing declaration
 
@@ -2426,7 +2494,9 @@ Dsymbol handleSymbolRedeclarations(ref Scope sc, Dsymbol s, Dsymbol s2, ScopeDsy
     auto vd2 = s2.isVarDeclaration(); // existing declaration
     if (vd && vd2)
     {
-        // if one is `static` and the other isn't
+        /* if one is `static` and the other isn't, the result is undefined
+         * behavior, C11 6.2.2.7
+         */
         if ((vd.storage_class ^ vd2.storage_class) & STC.static_)
             return collision();
 
@@ -2436,8 +2506,11 @@ Dsymbol handleSymbolRedeclarations(ref Scope sc, Dsymbol s, Dsymbol s2, ScopeDsy
         if (i1 && i2)
             return collision();         // can't both have initializers
 
-        if (i1)
+        if (i1)                         // vd is the definition
+        {
+            sds.symtab.update(vd);      // replace vd2 with the definition
             return vd;
+        }
 
         /* BUG: the types should match, which needs semantic() to be run on it
          *    extern int x;
@@ -2454,19 +2527,41 @@ Dsymbol handleSymbolRedeclarations(ref Scope sc, Dsymbol s, Dsymbol s2, ScopeDsy
     auto fd2 = s2.isFuncDeclaration(); // existing declaration
     if (fd && fd2)
     {
-        // if one is `static` and the other isn't
-        if ((fd.storage_class ^ fd2.storage_class) & STC.static_)
+        /* if one is `static` and the other isn't, the result is undefined
+         * behavior, C11 6.2.2.7
+         * However, match what gcc allows:
+         *    static int sun1(); int sun1() { return 0; }
+         * and:
+         *    static int sun2() { return 0; } int sun2();
+         * Both produce a static function.
+         *
+         * Both of these should fail:
+         *    int sun3(); static int sun3() { return 0; }
+         * and:
+         *    int sun4() { return 0; } static int sun4();
+         */
+        // if adding `static`
+        if (   fd.storage_class & STC.static_ &&
+            !(fd2.storage_class & STC.static_))
+        {
             return collision();
+        }
 
         if (fd.fbody && fd2.fbody)
             return collision();         // can't both have bodies
 
-        if (fd.fbody)
+        if (fd.fbody)                   // fd is the definition
+        {
+            sds.symtab.update(fd);      // replace fd2 in symbol table with fd
+            fd.overnext = fd2;
             return fd;
+        }
 
-        /* BUG: just like with VarDeclaration, the types should match, which needs semantic() to be run on it.
-         * FuncDeclaration::semantic2() can detect this, but it relies overnext being set.
+        /* Just like with VarDeclaration, the types should match, which needs semantic() to be run on it.
+         * FuncDeclaration::semantic() detects this, but it relies on .overnext being set.
          */
+        fd2.overloadInsert(fd);
+
         return fd2;
     }
 

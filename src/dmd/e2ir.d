@@ -1,9 +1,9 @@
 /**
  * Converts expressions to Intermediate Representation (IR) for the backend.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/e2ir.d, _e2ir.d)
  * Documentation: https://dlang.org/phobos/dmd_e2ir.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/e2ir.d
@@ -46,6 +46,7 @@ import dmd.id;
 import dmd.init;
 import dmd.mtype;
 import dmd.objc_glue;
+import dmd.printast;
 import dmd.s2ir;
 import dmd.sideeffect;
 import dmd.statement;
@@ -596,7 +597,7 @@ extern (C++) class ToElemVisitor : Visitor
         if (se.var.toParent2())
             fd = se.var.toParent2().isFuncDeclaration();
 
-        const bool nrvo = fd && fd.nrvo_can && fd.nrvo_var == se.var;
+        const bool nrvo = fd && fd.isNRVO() && fd.nrvo_var == se.var;
         if (nrvo)
             s = fd.shidden;
 
@@ -1356,8 +1357,8 @@ extern (C++) class ToElemVisitor : Visitor
                 elem *ez = el_calloc();
                 ez.Eoper = OPconst;
                 ez.Ety = e.Ety;
-                ez.EV.Vcent.lsw = 0;
-                ez.EV.Vcent.msw = 0;
+                ez.EV.Vcent.lo = 0;
+                ez.EV.Vcent.hi = 0;
                 e = el_bin(OPmin, totym(ne.type), ez, e);
                 break;
             }
@@ -1395,8 +1396,8 @@ extern (C++) class ToElemVisitor : Visitor
                 elem *ec = el_calloc();
                 ec.Eoper = OPconst;
                 ec.Ety = e1.Ety;
-                ec.EV.Vcent.lsw = ~0L;
-                ec.EV.Vcent.msw = ~0L;
+                ec.EV.Vcent.lo = ~0L;
+                ec.EV.Vcent.hi = ~0L;
                 e = el_bin(OPxor, ty, e1, ec);
                 break;
             }
@@ -1559,6 +1560,16 @@ extern (C++) class ToElemVisitor : Visitor
         result = e;
     }
 
+    override void visit(ThrowExp te)
+    {
+        //printf("ThrowExp.toElem() '%s'\n", te.toChars());
+
+        elem *e = toElemDtor(te.e1, irs);
+        const rtlthrow = config.ehmethod == EHmethod.EH_DWARF ? RTLSYM.THROWDWARF : RTLSYM.THROWC;
+        elem *sym = el_var(getRtlsym(rtlthrow));
+        result = el_bin(OPcall, TYnoreturn, sym, e);
+    }
+
     override void visit(PostExp pe)
     {
         //printf("PostExp.toElem() '%s'\n", pe.toChars());
@@ -1599,6 +1610,7 @@ extern (C++) class ToElemVisitor : Visitor
     elem *toElemBinAssign(BinAssignExp be, int op)
     {
         //printf("toElemBinAssign() '%s'\n", be.toChars());
+        //printAST(be);
 
         Type tb1 = be.e1.type.toBasetype();
         Type tb2 = be.e2.type.toBasetype();
@@ -1643,6 +1655,15 @@ extern (C++) class ToElemVisitor : Visitor
         else
         {
             el = toElem(be.e1, irs);
+
+            if (el.Eoper == OPbit)
+            {
+                elem *er = toElem(be.e2, irs);
+                elem* e = el_bin(op, tym, el, er);
+                elem_setLoc(e,be.loc);
+                return e;
+            }
+
             el = addressElem(el, be.e1.type.pointerTo());
             ev = el_same(&el);
 
@@ -1688,7 +1709,7 @@ extern (C++) class ToElemVisitor : Visitor
     }
 
     /***************************************
-     * http://dlang.org/spec/expression.html#cat_expressions
+     * https://dlang.org/spec/expression.html#cat_expressions
      */
 
     override void visit(CatExp ce)
@@ -1877,7 +1898,7 @@ extern (C++) class ToElemVisitor : Visitor
                 elem* eptr1, eptr2; // Pointer to data, to pass to memcmp
                 elem* elen1, elen2; // Length, for comparison
                 elem* esiz1, esiz2; // Data size, to pass to memcmp
-                d_uns64 sz = telement.size(); // Size of one element
+                const sz = telement.size(); // Size of one element
 
                 if (t1.ty == Tarray)
                 {
@@ -3476,28 +3497,6 @@ extern (C++) class ToElemVisitor : Visitor
         RTLSYM rtl;
         switch (tb.ty)
         {
-            case Tarray:
-            {
-                e = addressElem(e, de.e1.type);
-                rtl = RTLSYM.DELARRAYT;
-
-                /* See if we need to run destructors on the array contents
-                 */
-                elem *et = null;
-                Type tv = tb.nextOf().baseElemOf();
-                if (auto ts = tv.isTypeStruct())
-                {
-                    // FIXME: ts can be non-mutable, but _d_delarray_t requests TypeInfo_Struct.
-                    StructDeclaration sd = ts.sym;
-                    if (sd.dtor)
-                        et = getTypeInfo(de.e1.loc, tb.nextOf(), irs);
-                }
-                if (!et)                            // if no destructors needed
-                    et = el_long(TYnptr, 0);        // pass null for TypeInfo
-                e = el_params(et, e, null);
-                // call _d_delarray_t(e, et);
-                break;
-            }
             case Tclass:
                 if (de.e1.op == EXP.variable)
                 {
@@ -3511,26 +3510,7 @@ extern (C++) class ToElemVisitor : Visitor
                         break;
                     }
                 }
-                e = addressElem(e, de.e1.type);
-                rtl = RTLSYM.DELCLASS;
-                if (tb.isClassHandle().isInterfaceDeclaration())
-                    rtl = RTLSYM.DELINTERFACE;
-                break;
-
-            case Tpointer:
-                e = addressElem(e, de.e1.type);
-                rtl = RTLSYM.DELMEMORY;
-                tb = (cast(TypePointer)tb).next.toBasetype();
-                if (auto ts = tb.isTypeStruct())
-                {
-                    if (ts.sym.dtor)
-                    {
-                        rtl = RTLSYM.DELSTRUCT;
-                        elem *et = getTypeInfo(de.e1.loc, tb, irs);
-                        e = el_params(et, e, null);
-                    }
-                }
-                break;
+                goto default;
 
             default:
                 assert(0);
@@ -3956,6 +3936,8 @@ extern (C++) class ToElemVisitor : Visitor
 
                 case X(Tbool,Tint64):
                 case X(Tbool,Tuns64):
+                case X(Tbool,Tint128):
+                case X(Tbool,Tuns128):
                 case X(Tbool,Tfloat32):
                 case X(Tbool,Tfloat64):
                 case X(Tbool,Tfloat80):
@@ -3980,6 +3962,8 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tint8,Tuns32):   eop = OPs8_16;  return Leop(ce, e, eop, ttym);
                 case X(Tint8,Tint64):
                 case X(Tint8,Tuns64):
+                case X(Tint8,Tint128):
+                case X(Tint8,Tuns128):
                 case X(Tint8,Tfloat32):
                 case X(Tint8,Tfloat64):
                 case X(Tint8,Tfloat80):
@@ -4002,6 +3986,8 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tuns8,Tuns32):   eop = OPu8_16;  return Leop(ce, e, eop, ttym);
                 case X(Tuns8,Tint64):
                 case X(Tuns8,Tuns64):
+                case X(Tuns8,Tint128):
+                case X(Tuns8,Tuns128):
                 case X(Tuns8,Tfloat32):
                 case X(Tuns8,Tfloat64):
                 case X(Tuns8,Tfloat80):
@@ -4023,7 +4009,10 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tint16,Tint32):
                 case X(Tint16,Tuns32):  eop = OPs16_32; return Leop(ce, e, eop, ttym);
                 case X(Tint16,Tint64):
-                case X(Tint16,Tuns64):  e = el_una(OPs16_32, TYint, e);
+                case X(Tint16,Tuns64):
+                case X(Tint16,Tint128):
+                case X(Tint16,Tuns128):
+                    e = el_una(OPs16_32, TYint, e);
                     fty = Tint32;
                     continue;
                 case X(Tint16,Tfloat32):
@@ -4048,6 +4037,8 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tuns16,Tuns32):  eop = OPu16_32; return Leop(ce, e, eop, ttym);
                 case X(Tuns16,Tint64):
                 case X(Tuns16,Tuns64):
+                case X(Tuns16,Tint128):
+                case X(Tuns16,Tuns128):
                 case X(Tuns16,Tfloat64):
                 case X(Tuns16,Tfloat32):
                 case X(Tuns16,Tfloat80):
@@ -4072,6 +4063,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tint32,Tuns32):  return Lpaint(ce, e, ttym);
                 case X(Tint32,Tint64):
                 case X(Tint32,Tuns64):  eop = OPs32_64; return Leop(ce, e, eop, ttym);
+                case X(Tint32,Tint128):
+                case X(Tint32,Tuns128):
+                    e = el_una(OPs32_64, TYullong, e);
+                    fty = Tint64;
+                    continue;
                 case X(Tint32,Tfloat32):
                 case X(Tint32,Tfloat64):
                 case X(Tint32,Tfloat80):
@@ -4096,6 +4092,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tuns32,Tint32):  return Lpaint(ce, e, ttym);
                 case X(Tuns32,Tint64):
                 case X(Tuns32,Tuns64):  eop = OPu32_64; return Leop(ce, e, eop, ttym);
+                case X(Tuns32,Tint128):
+                case X(Tuns32,Tuns128):
+                    e = el_una(OPs32_64, TYullong, e);
+                    fty = Tuns64;
+                    continue;
                 case X(Tuns32,Tfloat32):
                 case X(Tuns32,Tfloat64):
                 case X(Tuns32,Tfloat80):
@@ -4120,6 +4121,8 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tint64,Tint32):
                 case X(Tint64,Tuns32):  eop = OP64_32; return Leop(ce, e, eop, ttym);
                 case X(Tint64,Tuns64):  return Lpaint(ce, e, ttym);
+                case X(Tint64,Tint128):
+                case X(Tint64,Tuns128):  eop = OPs64_128; return Leop(ce, e, eop, ttym);
                 case X(Tint64,Tfloat32):
                 case X(Tint64,Tfloat64):
                 case X(Tint64,Tfloat80):
@@ -4144,6 +4147,8 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tuns64,Tint32):
                 case X(Tuns64,Tuns32):  eop = OP64_32;  return Leop(ce, e, eop, ttym);
                 case X(Tuns64,Tint64):  return Lpaint(ce, e, ttym);
+                case X(Tuns64,Tint128):
+                case X(Tuns64,Tuns128):  eop = OPu64_128; return Leop(ce, e, eop, ttym);
                 case X(Tuns64,Tfloat32):
                 case X(Tuns64,Tfloat64):
                 case X(Tuns64,Tfloat80):
@@ -4159,6 +4164,66 @@ extern (C++) class ToElemVisitor : Visitor
 
                     /* ============================= */
 
+                case X(Tint128,Tint8):
+                case X(Tint128,Tuns8):
+                case X(Tint128,Tint16):
+                case X(Tint128,Tuns16):
+                case X(Tint128,Tint32):
+                case X(Tint128,Tuns32):
+                    e = el_una(OP128_64, TYllong, e);
+                    fty = Tint64;
+                    continue;
+                case X(Tint128,Tint64):
+                case X(Tint128,Tuns64):  eop = OP128_64; return Leop(ce, e, eop, ttym);
+                case X(Tint128,Tuns128): return Lpaint(ce, e, ttym);
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tint128,Tfloat32):
+                case X(Tint128,Tfloat64):
+                case X(Tint128,Tfloat80):
+                case X(Tint128,Tcomplex32):
+                case X(Tint128,Tcomplex64):
+                case X(Tint128,Tcomplex80):
+                    e = el_una(OPs64_d, TYdouble, e);
+                    fty = Tfloat64;
+                    continue;
+            }
+                case X(Tint128,Timaginary32):
+                case X(Tint128,Timaginary64):
+                case X(Tint128,Timaginary80): return Lzero(ce, e, ttym);
+
+                    /* ============================= */
+
+                case X(Tuns128,Tint8):
+                case X(Tuns128,Tuns8):
+                case X(Tuns128,Tint16):
+                case X(Tuns128,Tuns16):
+                case X(Tuns128,Tint32):
+                case X(Tuns128,Tuns32):
+                    e = el_una(OP128_64, TYllong, e);
+                    fty = Tint64;
+                    continue;
+                case X(Tuns128,Tint64):
+                case X(Tuns128,Tuns64):  eop = OP128_64;  return Leop(ce, e, eop, ttym);
+                case X(Tuns128,Tint128):  return Lpaint(ce, e, ttym);
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tuns128,Tfloat32):
+                case X(Tuns128,Tfloat64):
+                case X(Tuns128,Tfloat80):
+                case X(Tuns128,Tcomplex32):
+                case X(Tuns128,Tcomplex64):
+                case X(Tuns128,Tcomplex80):
+                    e = el_una(OPu64_d, TYdouble, e);
+                    fty = Tfloat64;
+                    continue;
+            }
+                case X(Tuns128,Timaginary32):
+                case X(Tuns128,Timaginary64):
+                case X(Tuns128,Timaginary80): return Lzero(ce, e, ttym);
+
+                    /* ============================= */
+
                 case X(Tfloat32,Tint8):
                 case X(Tfloat32,Tuns8):
                 case X(Tfloat32,Tint16):
@@ -4167,7 +4232,13 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tfloat32,Tuns32):
                 case X(Tfloat32,Tint64):
                 case X(Tfloat32,Tuns64):
-                case X(Tfloat32,Tfloat80): e = el_una(OPf_d, TYdouble, e);
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tfloat32,Tint128):
+                case X(Tfloat32,Tuns128):
+            }
+                case X(Tfloat32,Tfloat80):
+                    e = el_una(OPf_d, TYdouble, e);
                     fty = Tfloat64;
                     continue;
                 case X(Tfloat32,Tfloat64): eop = OPf_d; return Leop(ce, e, eop, ttym);
@@ -4193,6 +4264,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tfloat64,Tuns32):   eop = OPd_u32; return Leop(ce, e, eop, ttym);
                 case X(Tfloat64,Tint64):   eop = OPd_s64; return Leop(ce, e, eop, ttym);
                 case X(Tfloat64,Tuns64):   eop = OPd_u64; return Leop(ce, e, eop, ttym);
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tfloat64,Tint128):
+                case X(Tfloat64,Tuns128):
+            }
                 case X(Tfloat64,Tfloat32): eop = OPd_f;   return Leop(ce, e, eop, ttym);
                 case X(Tfloat64,Tfloat80): eop = OPd_ld;  return Leop(ce, e, eop, ttym);
                 case X(Tfloat64,Timaginary32):
@@ -4214,6 +4290,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tfloat80,Tint32):
                 case X(Tfloat80,Tuns32):
                 case X(Tfloat80,Tint64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tfloat80,Tint128):
+                case X(Tfloat80,Tuns128):
+            }
                 case X(Tfloat80,Tfloat32): e = el_una(OPld_d, TYdouble, e);
                     fty = Tfloat64;
                     continue;
@@ -4242,6 +4323,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Timaginary32,Tuns64):
                 case X(Timaginary32,Tfloat32):
                 case X(Timaginary32,Tfloat64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Timaginary32,Tint128):
+                case X(Timaginary32,Tuns128):
+            }
                 case X(Timaginary32,Tfloat80):  return Lzero(ce, e, ttym);
                 case X(Timaginary32,Timaginary64): eop = OPf_d; return Leop(ce, e, eop, ttym);
                 case X(Timaginary32,Timaginary80):
@@ -4265,6 +4351,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Timaginary64,Tuns32):
                 case X(Timaginary64,Tint64):
                 case X(Timaginary64,Tuns64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Timaginary64,Tint128):
+                case X(Timaginary64,Tuns128):
+            }
                 case X(Timaginary64,Tfloat32):
                 case X(Timaginary64,Tfloat64):
                 case X(Timaginary64,Tfloat80):  return Lzero(ce, e, ttym);
@@ -4287,6 +4378,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Timaginary80,Tuns32):
                 case X(Timaginary80,Tint64):
                 case X(Timaginary80,Tuns64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Timaginary80,Tint128):
+                case X(Timaginary80,Tuns128):
+            }
                 case X(Timaginary80,Tfloat32):
                 case X(Timaginary80,Tfloat64):
                 case X(Timaginary80,Tfloat80):  return Lzero(ce, e, ttym);
@@ -4311,6 +4407,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tcomplex32,Tuns32):
                 case X(Tcomplex32,Tint64):
                 case X(Tcomplex32,Tuns64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tcomplex32,Tint128):
+                case X(Tcomplex32,Tuns128):
+            }
                 case X(Tcomplex32,Tfloat32):
                 case X(Tcomplex32,Tfloat64):
                 case X(Tcomplex32,Tfloat80):
@@ -4339,6 +4440,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tcomplex64,Tuns32):
                 case X(Tcomplex64,Tint64):
                 case X(Tcomplex64,Tuns64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tcomplex64,Tint128):
+                case X(Tcomplex64,Tuns128):
+            }
                 case X(Tcomplex64,Tfloat32):
                 case X(Tcomplex64,Tfloat64):
                 case X(Tcomplex64,Tfloat80):
@@ -4364,6 +4470,11 @@ extern (C++) class ToElemVisitor : Visitor
                 case X(Tcomplex80,Tuns32):
                 case X(Tcomplex80,Tint64):
                 case X(Tcomplex80,Tuns64):
+            static if (0)       // cent <=> floating point not supported yet
+            {
+                case X(Tcomplex80,Tint128):
+                case X(Tcomplex80,Tuns128):
+            }
                 case X(Tcomplex80,Tfloat32):
                 case X(Tcomplex80,Tfloat64):
                 case X(Tcomplex80,Tfloat80):
@@ -5154,13 +5265,10 @@ elem *callfunc(const ref Loc loc,
             elem*[2] elems_array = void;
         else
             elem*[10] elems_array = void;
-        import core.stdc.stdlib : malloc, free;
-        auto pe = (n <= elems_array.length)
-                  ? elems_array.ptr
-                  : cast(elem**)Mem.check(malloc(arguments.dim * (elem*).sizeof));
-        elem*[] elems = pe[0 .. n];
-        scope (exit) if (elems.ptr != elems_array.ptr)
-            free(elems.ptr);
+
+        import dmd.common.string : SmallBuffer;
+        auto pe = SmallBuffer!(elem*)(n, elems_array[]);
+        elem*[] elems = pe[];
 
         /* Fill elems[] with arguments converted to elems
          */
@@ -5264,7 +5372,7 @@ elem *callfunc(const ref Loc loc,
 
         }
         if (!left_to_right &&
-            !irs.m.isCFile) // C11 leaves evaluation order implementation-defined, but
+            !irs.Cfile)     // C11 leaves evaluation order implementation-defined, but
                             // try to match evaluation order of other C compilers
         {
             eside = fixArgumentEvaluationOrder(elems);
@@ -5501,16 +5609,11 @@ elem *callfunc(const ref Loc loc,
         else
             e = el_una(op,tyret,ep);
     }
-    else if (irs.Cfile && (e = builtinC(fd, ep)) !is null)
-    {
-        // handled magic C builtins
-        el_free(ec);
-    }
     else
     {
         // `OPcallns` used to be passed here for certain pure functions,
         // but optimizations based on pure have to be retought, see:
-        // http://issues.dlang.org/show_bug.cgi?id=22277
+        // https://issues.dlang.org/show_bug.cgi?id=22277
         if (ep)
             e = el_bin(OPcall, tyret, ec, ep);
         else
@@ -5833,9 +5936,6 @@ elem *sarray_toDarray(const ref Loc loc, Type tfrom, Type tto, elem *e)
     e = el_pair(TYdarray, elen, e);
     return e;
 }
-
-/************************************
- */
 
 elem *getTypeInfo(Loc loc, Type t, IRState *irs)
 {
@@ -6708,7 +6808,7 @@ elem *genHalt(const ref Loc loc)
  */
 elem* setEthis2(const ref Loc loc, IRState* irs, FuncDeclaration fd, elem* ethis2, elem** ethis, elem** eside)
 {
-    if (!fd.isThis2)
+    if (!fd.hasDualContext())
         return null;
 
     assert(ethis2 && ethis && *ethis);
@@ -6725,32 +6825,6 @@ elem* setEthis2(const ref Loc loc, IRState* irs, FuncDeclaration fd, elem* ethis
     *eside = el_combine(eeq1, *eside);
 
     return ethis2;
-}
-
-/*********************************************
- * Handle magic C __builtin functions.
- * Params:
- *      fd = magic function declaration
- *      e  = function parameters
- * Returns:
- *      if not null, then the rewrite of the magic function call
- */
-private
-elem* builtinC(FuncDeclaration fd, elem* e)
-{
-    if (!fd)
-        return null;
-    const id = fd.ident;
-    if (id == Id.builtin_va_start)
-    {
-        return constructVa_start(e);
-    }
-    else if (id == Id.builtin_va_end)
-    {
-        assert(e.Eoper != OPparam);       // one parameter only
-        return el_una(OPbool, TYbool, e); // evaluate ep for side effects only
-    }
-    return null;
 }
 
 /*******************************

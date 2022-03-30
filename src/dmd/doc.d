@@ -3,9 +3,9 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/ddoc.html, Documentation Generator)
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/doc.d, _doc.d)
  * Documentation:  https://dlang.org/phobos/dmd_doc.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/doc.d
@@ -49,8 +49,8 @@ import dmd.common.outbuffer;
 import dmd.root.port;
 import dmd.root.rmem;
 import dmd.root.string;
+import dmd.root.utf;
 import dmd.tokens;
-import dmd.utf;
 import dmd.utils;
 import dmd.visitor;
 
@@ -425,7 +425,7 @@ extern(C++) void gendocfile(Module m)
         dc.copyright.nooutput = 1;
         m.macrotable.define("COPYRIGHT", dc.copyright.body_);
     }
-    if (m.isDocFile)
+    if (m.filetype == FileType.ddoc)
     {
         const ploc = m.md ? &m.md.loc : &m.loc;
         const loc = Loc(ploc.filename ? ploc.filename : srcfilename.ptr,
@@ -4991,7 +4991,7 @@ private void highlightText(Scope* sc, Dsymbols* a, Loc loc, ref OutBuffer buf, s
 
         default:
             leadingBlank = false;
-            if (sc._module.isDocFile || inCode)
+            if (sc._module.filetype == FileType.ddoc || inCode)
                 break;
             const start = cast(char*)buf[].ptr + i;
             if (isIdStart(start))

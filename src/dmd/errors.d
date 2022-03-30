@@ -1,9 +1,9 @@
 /**
  * Functions for raising errors.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/errors.d, _errors.d)
  * Documentation:  https://dlang.org/phobos/dmd_errors.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/errors.d
@@ -387,12 +387,11 @@ private void verrorPrint(const ref Loc loc, Color headerColor, const(char)* head
         !loc.filename.strstr(".d-mixin-") &&
         !global.params.mixinOut)
     {
-        import dmd.file_manager : FileManager;
         import dmd.root.filename : FileName;
         const fileName = FileName(loc.filename.toDString);
-        if (auto file = FileManager.fileManager.lookup(fileName))
+        if (auto file = global.fileManager.lookup(fileName))
         {
-            const(char)[][] lines = FileManager.fileManager.getLines(fileName);
+            const(char)[][] lines = global.fileManager.getLines(fileName);
             if (loc.linnum - 1 < lines.length)
             {
                 auto line = lines[loc.linnum - 1];
@@ -405,7 +404,7 @@ private void verrorPrint(const ref Loc loc, Color headerColor, const(char)* head
                     size_t c = 0;
                     while (c < loc.charnum - 1)
                     {
-                        import dmd.utf : utf_decodeChar;
+                        import dmd.root.utf : utf_decodeChar;
                         dchar u;
                         const msg = utf_decodeChar(line, c, u);
                         assert(msg is null, msg);
@@ -549,14 +548,14 @@ private void _vwarningSupplemental(const ref Loc loc, const(char)* format, va_li
  */
 extern (C++) void vdeprecation(const ref Loc loc, const(char)* format, va_list ap, const(char)* p1 = null, const(char)* p2 = null)
 {
-    __gshared const(char)* header = "Deprecation: ";
+    static immutable header = "Deprecation: ";
     if (global.params.useDeprecated == DiagnosticReporting.error)
-        verror(loc, format, ap, p1, p2, header);
+        verror(loc, format, ap, p1, p2, header.ptr);
     else if (global.params.useDeprecated == DiagnosticReporting.inform)
     {
         if (!global.gag)
         {
-            verrorPrint(loc, Classification.deprecation, header, format, ap, p1, p2);
+            verrorPrint(loc, Classification.deprecation, header.ptr, format, ap, p1, p2);
         }
         else
         {

@@ -8,14 +8,14 @@
  * - bit instructions (bit scan, population count)
  *
  * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * $(LINK2 https://www.dlang.org, D programming language).
  *
  * Mostly code generation for assignment operators.
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
- *              Copyright (C) 2000-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ *              Copyright (C) 2000-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cod4.d, backend/cod4.d)
  * Documentation:  https://dlang.org/phobos/dmd_backend_cod4.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/backend/cod4.d
@@ -2879,7 +2879,7 @@ void cdcmp(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
 
             cs.IFL2 = FLconst;
             if (sz == 16)
-                cs.IEV2.Vsize_t = cast(targ_size_t)e2.EV.Vcent.msw;
+                cs.IEV2.Vsize_t = cast(targ_size_t)e2.EV.Vcent.hi;
             else if (sz > REGSIZE)
                 cs.IEV2.Vint = cast(int)MSREG(e2.EV.Vllong);
             else
@@ -3613,7 +3613,8 @@ void cdshtlng(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
     else if (
              op == OPnp_fp ||
              (I16 && op == OPu16_32) ||
-             (I32 && op == OPu32_64)
+             (I32 && op == OPu32_64) ||
+             (I64 && op == OPu64_128)
             )
     {
         /* Result goes into a register pair.
@@ -3808,7 +3809,7 @@ void cdshtlng(ref CodeBuilder cdb,elem *e,regm_t *pretregs)
     }
     else
     {
-        // OPs16_32, OPs32_64
+        // OPs16_32, OPs32_64, OPs64_128
         uint msreg,lsreg;
 
         retregs = *pretregs & mLSW;

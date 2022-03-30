@@ -1,9 +1,9 @@
 /**
  * Semantic analysis for D types.
  *
- * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
- * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
- * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
+ * Copyright:   Copyright (C) 1999-2022 by The D Language Foundation, All Rights Reserved
+ * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
+ * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/typesem.d, _typesem.d)
  * Documentation:  https://dlang.org/phobos/dmd_typesem.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/typesem.d
@@ -22,7 +22,6 @@ import dmd.arrayop;
 import dmd.arraytypes;
 import dmd.astcodegen;
 import dmd.astenums;
-import dmd.complex;
 import dmd.dcast;
 import dmd.dclass;
 import dmd.declaration;
@@ -52,6 +51,7 @@ import dmd.mtype;
 import dmd.objc;
 import dmd.opover;
 import dmd.parse;
+import dmd.root.complex;
 import dmd.root.ctfloat;
 import dmd.root.rmem;
 import dmd.common.outbuffer;
@@ -161,7 +161,7 @@ private void resolveTupleIndex(const ref Loc loc, Scope* sc, Dsymbol s, out Expr
     const(uinteger_t) d = eindex.toUInteger();
     if (d >= tup.objects.dim)
     {
-        .error(loc, "tuple index `%llu` exceeds length %zu", d, tup.objects.dim);
+        .error(loc, "tuple index `%llu` exceeds length %llu", d, cast(ulong)tup.objects.dim);
         pt = Type.terror;
         return;
     }
@@ -210,6 +210,9 @@ private void resolveHelper(TypeQualified mt, const ref Loc loc, Scope* sc, Dsymb
             error(loc, "undefined identifier `%s`, did you mean %s `%s`?", p, s2.kind(), s2.toChars());
         else if (const q = Scope.search_correct_C(id))
             error(loc, "undefined identifier `%s`, did you mean `%s`?", p, q);
+        else if ((id == Id.This   && sc.getStructClassScope()) ||
+                 (id == Id._super && sc.getClassScope()))
+            error(loc, "undefined identifier `%s`, did you mean `typeof(%s)`?", p, p);
         else
             error(loc, "undefined identifier `%s`", p);
 
@@ -271,9 +274,9 @@ private void resolveHelper(TypeQualified mt, const ref Loc loc, Scope* sc, Dsymb
                 sm = null;
             }
             // Same check as in Expression.semanticY(DotIdExp)
-            else if (sm.isPackage() && checkAccess(sc, cast(Package)sm))
+            else if (sm.isPackage() && checkAccess(sc, sm.isPackage()))
             {
-                // @@@DEPRECATED_2.096@@@
+                // @@@DEPRECATED_2.106@@@
                 // Should be an error in 2.106. Just remove the deprecation call
                 // and uncomment the null assignment
                 deprecation(loc, "%s %s is not accessible here, perhaps add 'static import %s;'", sm.kind(), sm.toPrettyChars(), sm.toPrettyChars());
@@ -509,7 +512,7 @@ private Type stripDefaultArgs(Type t)
         Parameters* params = stripParams(tf.parameterList.parameters);
         if (tret == tf.next && params == tf.parameterList.parameters)
             return t;
-        TypeFunction tr = cast(TypeFunction)tf.copy();
+        TypeFunction tr = tf.copy().isTypeFunction();
         tr.parameterList.parameters = params;
         tr.next = tret;
         //printf("strip %s\n   <- %s\n", tr.toChars(), t.toChars());
@@ -520,7 +523,7 @@ private Type stripDefaultArgs(Type t)
         Parameters* args = stripParams(tt.arguments);
         if (args == tt.arguments)
             return t;
-        TypeTuple tr = cast(TypeTuple)t.copy();
+        TypeTuple tr = t.copy().isTypeTuple();
         tr.arguments = args;
         return tr;
     }
@@ -588,11 +591,11 @@ Expression typeToExpression(Type t)
         return null;
     switch (t.ty)
     {
-        case Tsarray:   return visitSArray(cast(TypeSArray) t);
-        case Taarray:   return visitAArray(cast(TypeAArray) t);
-        case Tident:    return visitIdentifier(cast(TypeIdentifier) t);
-        case Tinstance: return visitInstance(cast(TypeInstance) t);
-        case Tmixin:    return visitMixin(cast(TypeMixin) t);
+        case Tsarray:   return visitSArray(t.isTypeSArray());
+        case Taarray:   return visitAArray(t.isTypeAArray());
+        case Tident:    return visitIdentifier(t.isTypeIdentifier());
+        case Tinstance: return visitInstance(t.isTypeInstance());
+        case Tmixin:    return visitMixin(t.isTypeMixin());
         default:        return null;
     }
 }
@@ -663,9 +666,13 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
 
     Type visitType(Type t)
     {
+        // @@@DEPRECATED_2.110@@@
+        // Use of `cent` and `ucent` has always been an error.
+        // Starting from 2.100, recommend core.int128 as a replace for the
+        // lack of compiler support.
         if (t.ty == Tint128 || t.ty == Tuns128)
         {
-            .error(loc, "`cent` and `ucent` types not implemented");
+            .error(loc, "`cent` and `ucent` types are obsolete, use `core.int128.Cent` instead");
             return error();
         }
 
@@ -684,7 +691,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             .error(loc, "T in __vector(T) must be a static array, not `%s`", mtype.basetype.toChars());
             return error();
         }
-        TypeSArray t = cast(TypeSArray)mtype.basetype;
+        TypeSArray t = mtype.basetype.isTypeSArray();
         const sz = cast(int)t.size(loc);
         final switch (target.isVectorTypeSupported(sz, t.nextOf()))
         {
@@ -790,8 +797,8 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                 return overflowError();
 
             Type tbx = tbn.baseElemOf();
-            if (tbx.ty == Tstruct && !(cast(TypeStruct)tbx).sym.members ||
-                tbx.ty == Tenum && !(cast(TypeEnum)tbx).sym.members)
+            if (tbx.ty == Tstruct && !tbx.isTypeStruct().sym.members ||
+                tbx.ty == Tenum && !tbx.isTypeEnum().sym.members)
             {
                 /* To avoid meaningless error message, skip the total size limit check
                  * when the bottom of element type is opaque.
@@ -802,7 +809,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                      tbn.ty == Tarray ||
                      tbn.ty == Tsarray ||
                      tbn.ty == Taarray ||
-                     (tbn.ty == Tstruct && ((cast(TypeStruct)tbn).sym.sizeok == Sizeok.done)) ||
+                     (tbn.ty == Tstruct && tbn.isTypeStruct().sym.sizeok == Sizeok.done) ||
                      tbn.ty == Tclass)
             {
                 /* Only do this for types that don't need to have semantic()
@@ -819,7 +826,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             {
                 // Index the tuple to get the type
                 assert(mtype.dim);
-                TypeTuple tt = cast(TypeTuple)tbn;
+                TypeTuple tt = tbn.isTypeTuple();
                 uinteger_t d = mtype.dim.toUInteger();
                 if (d >= tt.arguments.dim)
                 {
@@ -971,7 +978,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             // duplicate a part of StructDeclaration::semanticTypeInfoMembers
             //printf("AA = %s, key: xeq = %p, xerreq = %p xhash = %p\n", toChars(), sd.xeq, sd.xerreq, sd.xhash);
 
-            if (sd.xeq && sd.xeq.generated && sd.xeq._scope && sd.xeq.semanticRun < PASS.semantic3done)
+            if (sd.xeq && sd.xeq.isGenerated() && sd.xeq._scope && sd.xeq.semanticRun < PASS.semantic3done)
             {
                 uint errors = global.startGagging();
                 sd.xeq.semantic3(sd.xeq._scope);
@@ -1026,9 +1033,9 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                  */
             }
         }
-        else if (tbase.ty == Tclass && !(cast(TypeClass)tbase).sym.isInterfaceDeclaration())
+        else if (tbase.ty == Tclass && !tbase.isTypeClass().sym.isInterfaceDeclaration())
         {
-            ClassDeclaration cd = (cast(TypeClass)tbase).sym;
+            ClassDeclaration cd = tbase.isTypeClass().sym;
             if (cd.semanticRun < PASS.semanticdone)
                 cd.dsymbolSemantic(null);
 
@@ -1148,7 +1155,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             return mtype;
         }
         //printf("TypeFunction::semantic() this = %p\n", this);
-        //printf("TypeFunction::semantic() %s, sc.stc = %llx, fargs = %p\n", toChars(), sc.stc, fargs);
+        //printf("TypeFunction::semantic() %s, sc.stc = %llx\n", mtype.toChars(), sc.stc);
 
         bool errors = false;
 
@@ -1185,6 +1192,8 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             tf.isref = true;
         if (sc.stc & STC.return_)
             tf.isreturn = true;
+        if (sc.stc & STC.returnScope)
+            tf.isreturnscope = true;
         if (sc.stc & STC.returninferred)
             tf.isreturninferred = true;
         if (sc.stc & STC.scope_)
@@ -1275,7 +1284,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             }
             if (e.op == EXP.function_) // https://issues.dlang.org/show_bug.cgi?id=4820
             {
-                FuncExp fe = cast(FuncExp)e;
+                FuncExp fe = e.isFuncExp();
                 // Replace function literal with a function symbol,
                 // since default arg expression must be copied when used
                 // and copying the literal itself is wrong.
@@ -1295,7 +1304,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             // default arg must be an lvalue
             if (isRefOrOut && !isAuto &&
                 !(global.params.previewIn && (fparam.storageClass & STC.in_)) &&
-                !(global.params.rvalueRefParam))
+                global.params.rvalueRefParam != FeatureState.enabled)
                 e = e.toLvalue(sc, e);
 
             fparam.defaultArg = e;
@@ -1402,8 +1411,8 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                          (t.ty == Tstruct || t.ty == Tsarray || t.ty == Tenum))
                 {
                     Type tb2 = t.baseElemOf();
-                    if (tb2.ty == Tstruct && !(cast(TypeStruct)tb2).sym.members ||
-                        tb2.ty == Tenum && !(cast(TypeEnum)tb2).sym.memtype)
+                    if (tb2.ty == Tstruct && !tb2.isTypeStruct().sym.members ||
+                        tb2.ty == Tenum   && !tb2.isTypeEnum().sym.memtype)
                     {
                         if (global.params.previewIn && (fparam.storageClass & STC.in_))
                         {
@@ -1420,12 +1429,6 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                 {
                     .error(loc, "cannot have parameter of type `%s`", fparam.type.toChars());
                     errors = true;
-                }
-
-                if ((fparam.storageClass & (STC.ref_ | STC.wild)) == (STC.ref_ | STC.wild))
-                {
-                    // 'ref inout' implies 'return'
-                    fparam.storageClass |= STC.return_;
                 }
 
                 if (fparam.storageClass & STC.return_)
@@ -1455,6 +1458,17 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                             fparam.storageClass &= ~STC.return_;   // https://issues.dlang.org/show_bug.cgi?id=18963
                         }
                     }
+
+                    if (i + 1 == dim && tf.parameterList.varargs == VarArg.typesafe &&
+                        (t.isTypeDArray() || t.isTypeClass()))
+                    {
+                        /* This is because they can be constructed on the stack
+                         * https://dlang.org/spec/function.html#typesafe_variadic_functions
+                         */
+                        .error(loc, "typesafe variadic function parameter `%s` of type `%s` cannot be marked `return`",
+                            fparam.ident ? fparam.ident.toChars() : "", t.toChars());
+                        errors = true;
+                    }
                 }
 
                 if (fparam.storageClass & STC.out_)
@@ -1467,7 +1481,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                     else
                     {
                         Type tv = t.baseElemOf();
-                        if (tv.ty == Tstruct && (cast(TypeStruct)tv).sym.noDefaultCtor)
+                        if (tv.ty == Tstruct && tv.isTypeStruct().sym.noDefaultCtor)
                         {
                             .error(loc, "cannot have `out` parameter of type `%s` because the default construction is disabled", fparam.type.toChars());
                             errors = true;
@@ -1484,16 +1498,6 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
 
                 /* Scope attribute is not necessary if the parameter type does not have pointers
                  */
-                /* Constructors are treated as if they are being returned through the hidden parameter,
-                 * which is by ref, and the ref there is ignored.
-                 */
-                const returnByRef = tf.isref && !tf.isctor;
-                if (!returnByRef && isRefReturnScope(fparam.storageClass))
-                {
-                    /* if `ref return scope`, evaluate to `ref` `return scope`
-                     */
-                    fparam.storageClass |= STC.returnScope;
-                }
                 const sr = buildScopeRef(fparam.storageClass);
                 switch (sr)
                 {
@@ -1512,17 +1516,6 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
 
                     default:
                         break;
-                }
-
-                /* now set STC.returnScope based only on tf.isref. This is inconsistent, as mentioned above,
-                 * but necessary for compatibility for now.
-                 */
-                fparam.storageClass &= ~STC.returnScope;
-                if (!tf.isref && isRefReturnScope(fparam.storageClass))
-                {
-                    /* if `ref return scope`, evaluate to `ref` `return scope`
-                     */
-                    fparam.storageClass |= STC.returnScope;
                 }
 
                 // Remove redundant storage classes for type, they are already applied
@@ -1709,13 +1702,22 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             }
             else if (e.op == EXP.variable) // special case: variable is used as a type
             {
+                /*
+                    N.B. This branch currently triggers for the following code
+                    template test(x* x)
+                    {
+
+                    }
+                    i.e. the compiler prints "variable x is used as a type"
+                    which isn't a particularly good error message (x is a variable?).
+                */
                 Dsymbol varDecl = mtype.toDsymbol(sc);
                 const(Loc) varDeclLoc = varDecl.getLoc();
-                Module varDeclModule = varDecl.getModule();
+                Module varDeclModule = varDecl.getModule(); //This can be null
 
                 .error(loc, "variable `%s` is used as a type", mtype.toChars());
-
-                if (varDeclModule != sc._module) // variable is imported
+                //Check for null to avoid https://issues.dlang.org/show_bug.cgi?id=22574
+                if ((varDeclModule !is null) && varDeclModule != sc._module) // variable is imported
                 {
                     const(Loc) varDeclModuleImportLoc = varDeclModule.getLoc();
                     .errorSupplemental(
@@ -1791,6 +1793,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             mtype.exp.ident != Id.derivedMembers &&
             mtype.exp.ident != Id.getMember &&
             mtype.exp.ident != Id.parent &&
+            mtype.exp.ident != Id.parameters &&
             mtype.exp.ident != Id.child &&
             mtype.exp.ident != Id.toType &&
             mtype.exp.ident != Id.getOverloads &&
@@ -1815,26 +1818,26 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             switch (e.op)
             {
             case EXP.dotVariable:
-                mtype.sym = (cast(DotVarExp)e).var;
+                mtype.sym = e.isDotVarExp().var;
                 break;
             case EXP.variable:
-                mtype.sym = (cast(VarExp)e).var;
+                mtype.sym = e.isVarExp().var;
                 break;
             case EXP.function_:
-                auto fe = cast(FuncExp)e;
+                auto fe = e.isFuncExp();
                 mtype.sym = fe.td ? fe.td : fe.fd;
                 break;
             case EXP.dotTemplateDeclaration:
-                mtype.sym = (cast(DotTemplateExp)e).td;
+                mtype.sym = e.isDotTemplateExp().td;
                 break;
             case EXP.dSymbol:
-                mtype.sym = (cast(DsymbolExp)e).s;
+                mtype.sym = e.isDsymbolExp().s;
                 break;
             case EXP.template_:
-                mtype.sym = (cast(TemplateExp)e).td;
+                mtype.sym = e.isTemplateExp().td;
                 break;
             case EXP.scope_:
-                mtype.sym = (cast(ScopeExp)e).sds;
+                mtype.sym = e.isScopeExp().sds;
                 break;
             case EXP.tuple:
                 TupleExp te = e.toTupleExp();
@@ -1845,13 +1848,13 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                     switch (src.op)
                     {
                     case EXP.type:
-                        (*elems)[i] = (cast(TypeExp)src).type;
+                        (*elems)[i] = src.isTypeExp().type;
                         break;
                     case EXP.dotType:
-                        (*elems)[i] = (cast(DotTypeExp)src).sym.isType();
+                        (*elems)[i] = src.isDotTypeExp().sym.isType();
                         break;
                     case EXP.overloadSet:
-                        (*elems)[i] = (cast(OverExp)src).type;
+                        (*elems)[i] = src.isOverExp().type;
                         break;
                     default:
                         if (auto sym = isDsymbol(src))
@@ -1864,13 +1867,13 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                 mtype.sym = td;
                 break;
             case EXP.dotType:
-                result = (cast(DotTypeExp)e).sym.isType();
+                result = e.isDotTypeExp().sym.isType();
                 break;
             case EXP.type:
-                result = (cast(TypeExp)e).type;
+                result = e.isTypeExp().type;
                 break;
             case EXP.overloadSet:
-                result = (cast(OverExp)e).type;
+                result = e.isOverExp().type;
                 break;
             default:
                 break;
@@ -2031,6 +2034,22 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             return mtype.resolved;
         }
 
+        /* Find the current scope by skipping tag scopes.
+         * In C, tag scopes aren't considered scopes.
+         */
+        Scope* sc2 = sc;
+        while (1)
+        {
+            sc2 = sc2.inner();
+            auto scopesym = sc2.scopesym;
+            if (scopesym.isStructDeclaration())
+            {
+                sc2 = sc2.enclosing;
+                continue;
+            }
+            break;
+        }
+
         /* Declare mtype as a struct/union/enum declaration
          */
         void declareTag()
@@ -2038,22 +2057,22 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
             void declare(ScopeDsymbol sd)
             {
                 sd.members = mtype.members;
-                auto scopesym = sc.inner().scopesym;
+                auto scopesym = sc2.inner().scopesym;
                 if (scopesym.members)
                     scopesym.members.push(sd);
                 if (scopesym.symtab && !scopesym.symtabInsert(sd))
                 {
                     Dsymbol s2 = scopesym.symtabLookup(sd, mtype.id);
-                    handleTagSymbols(*sc, sd, s2, scopesym);
+                    handleTagSymbols(*sc2, sd, s2, scopesym);
                 }
-                sd.parent = sc.parent;
-                sd.dsymbolSemantic(sc);
+                sd.parent = sc2.parent;
+                sd.dsymbolSemantic(sc2);
             }
 
             switch (mtype.tok)
             {
                 case TOK.enum_:
-                    auto ed = new EnumDeclaration(mtype.loc, mtype.id, Type.tint32);
+                    auto ed = new EnumDeclaration(mtype.loc, mtype.id, mtype.base);
                     declare(ed);
                     mtype.resolved = visitEnum(new TypeEnum(ed));
                     break;
@@ -2089,7 +2108,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
         /* look for pre-existing declaration
          */
         Dsymbol scopesym;
-        auto s = sc.search(mtype.loc, mtype.id, &scopesym, IgnoreErrors | TagNameSpace);
+        auto s = sc2.search(mtype.loc, mtype.id, &scopesym, IgnoreErrors | TagNameSpace);
         if (!s || s.isModule())
         {
             // no pre-existing declaration, so declare it
@@ -2102,7 +2121,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
         /* A redeclaration only happens if both declarations are in
          * the same scope
          */
-        const bool redeclar = (scopesym == sc.inner().scopesym);
+        const bool redeclar = (scopesym == sc2.inner().scopesym);
 
         if (redeclar)
         {
@@ -2145,7 +2164,7 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
                          * picked up and added to the symtab.
                          */
                         sd.semanticRun = PASS.semantic;
-                        sd.dsymbolSemantic(sc);
+                        sd.dsymbolSemantic(sc2);
                     }
                 }
                 else
@@ -2202,26 +2221,26 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
     switch (type.ty)
     {
         default:         return visitType(type);
-        case Tvector:    return visitVector(cast(TypeVector)type);
-        case Tsarray:    return visitSArray(cast(TypeSArray)type);
-        case Tarray:     return visitDArray(cast(TypeDArray)type);
-        case Taarray:    return visitAArray(cast(TypeAArray)type);
-        case Tpointer:   return visitPointer(cast(TypePointer)type);
-        case Treference: return visitReference(cast(TypeReference)type);
-        case Tfunction:  return visitFunction(cast(TypeFunction)type);
-        case Tdelegate:  return visitDelegate(cast(TypeDelegate)type);
-        case Tident:     return visitIdentifier(cast(TypeIdentifier)type);
-        case Tinstance:  return visitInstance(cast(TypeInstance)type);
-        case Ttypeof:    return visitTypeof(cast(TypeTypeof)type);
-        case Ttraits:    return visitTraits(cast(TypeTraits)type);
-        case Treturn:    return visitReturn(cast(TypeReturn)type);
-        case Tstruct:    return visitStruct(cast(TypeStruct)type);
-        case Tenum:      return visitEnum(cast(TypeEnum)type);
-        case Tclass:     return visitClass(cast(TypeClass)type);
-        case Ttuple:     return visitTuple (cast(TypeTuple)type);
-        case Tslice:     return visitSlice(cast(TypeSlice)type);
-        case Tmixin:     return visitMixin(cast(TypeMixin)type);
-        case Ttag:       return visitTag(cast(TypeTag)type);
+        case Tvector:    return visitVector(type.isTypeVector());
+        case Tsarray:    return visitSArray(type.isTypeSArray());
+        case Tarray:     return visitDArray(type.isTypeDArray());
+        case Taarray:    return visitAArray(type.isTypeAArray());
+        case Tpointer:   return visitPointer(type.isTypePointer());
+        case Treference: return visitReference(type.isTypeReference());
+        case Tfunction:  return visitFunction(type.isTypeFunction());
+        case Tdelegate:  return visitDelegate(type.isTypeDelegate());
+        case Tident:     return visitIdentifier(type.isTypeIdentifier());
+        case Tinstance:  return visitInstance(type.isTypeInstance());
+        case Ttypeof:    return visitTypeof(type.isTypeTypeof());
+        case Ttraits:    return visitTraits(type.isTypeTraits());
+        case Treturn:    return visitReturn(type.isTypeReturn());
+        case Tstruct:    return visitStruct(type.isTypeStruct());
+        case Tenum:      return visitEnum(type.isTypeEnum());
+        case Tclass:     return visitClass(type.isTypeClass());
+        case Ttuple:     return visitTuple(type.isTypeTuple());
+        case Tslice:     return visitSlice(type.isTypeSlice());
+        case Tmixin:     return visitMixin(type.isTypeMixin());
+        case Ttag:       return visitTag(type.isTypeTag());
     }
 }
 
@@ -2291,7 +2310,7 @@ extern (C++) Type merge(Type type)
 
         case Tsarray:
             // prevents generating the mangle if the array dim is not yet known
-            if (!(cast(TypeSArray) type).dim.isIntegerExp())
+            if (!type.isTypeSArray().dim.isIntegerExp())
                 return type;
             goto default;
 
@@ -2299,7 +2318,7 @@ extern (C++) Type merge(Type type)
             break;
 
         case Taarray:
-            if (!(cast(TypeAArray)type).index.merge().deco)
+            if (!type.isTypeAArray().index.merge().deco)
                 return type;
             goto default;
 
@@ -2366,7 +2385,7 @@ Expression getProperty(Type t, Scope* scope_, const ref Loc loc, Identifier iden
         }
         if (ident == Id.__sizeof)
         {
-            d_uns64 sz = mt.size(loc);
+            const sz = mt.size(loc);
             if (sz == SIZE_INVALID)
                 return ErrorExp.get();
             e = new IntegerExp(loc, sz, Type.tsize_t);
@@ -2752,10 +2771,10 @@ Expression getProperty(Type t, Scope* scope_, const ref Loc loc, Identifier iden
                                 visitBasic(cast(TypeBasic)t) :
                                 visitType(t);
 
-        case Terror:    return visitError (cast(TypeError)t);
-        case Tvector:   return visitVector(cast(TypeVector)t);
-        case Tenum:     return visitEnum  (cast(TypeEnum)t);
-        case Ttuple:    return visitTuple (cast(TypeTuple)t);
+        case Terror:    return visitError (t.isTypeError());
+        case Tvector:   return visitVector(t.isTypeVector());
+        case Tenum:     return visitEnum  (t.isTypeEnum());
+        case Ttuple:    return visitTuple (t.isTypeTuple());
     }
 }
 
@@ -2880,7 +2899,7 @@ void resolve(Type mt, const ref Loc loc, Scope* sc, out Expression pe, out Type 
                 {
                     Expression e = cast(Expression)o;
                     if (e.op == EXP.dSymbol)
-                        return returnSymbol((cast(DsymbolExp)e).s);
+                        return returnSymbol(e.isDsymbolExp().s);
                     else
                         return returnExp(e);
                 }
@@ -2976,39 +2995,6 @@ void resolve(Type mt, const ref Loc loc, Scope* sc, out Expression pe, out Type 
     void visitIdentifier(TypeIdentifier mt)
     {
         //printf("TypeIdentifier::resolve(sc = %p, idents = '%s')\n", sc, mt.toChars());
-        if ((mt.ident.equals(Id._super) || mt.ident.equals(Id.This)) && !hasThis(sc))
-        {
-            // @@@DEPRECATED_v2.091@@@.
-            // Made an error in 2.086.
-            // Eligible for removal in 2.091.
-            if (mt.ident.equals(Id._super))
-            {
-                error(mt.loc, "Using `super` as a type is obsolete. Use `typeof(super)` instead");
-            }
-             // @@@DEPRECATED_v2.091@@@.
-            // Made an error in 2.086.
-            // Eligible for removal in 2.091.
-            if (mt.ident.equals(Id.This))
-            {
-                error(mt.loc, "Using `this` as a type is obsolete. Use `typeof(this)` instead");
-            }
-            if (AggregateDeclaration ad = sc.getStructClassScope())
-            {
-                if (ClassDeclaration cd = ad.isClassDeclaration())
-                {
-                    if (mt.ident.equals(Id.This))
-                        mt.ident = cd.ident;
-                    else if (cd.baseClass && mt.ident.equals(Id._super))
-                        mt.ident = cd.baseClass.ident;
-                }
-                else
-                {
-                    StructDeclaration sd = ad.isStructDeclaration();
-                    if (sd && mt.ident.equals(Id.This))
-                        mt.ident = sd.ident;
-                }
-            }
-        }
         if (mt.ident == Id.ctfe)
         {
             error(loc, "variable `__ctfe` cannot be read at compile time");
@@ -3021,7 +3007,7 @@ void resolve(Type mt, const ref Loc loc, Scope* sc, out Expression pe, out Type 
              * If we ever do care, import core.stdc.stdarg and pull
              * the definition out of that, similarly to how std.math is handled for PowExp
              */
-            pt = Type.tvoidptr;
+            pt = target.va_listType(loc, sc);
             return;
         }
 
@@ -3155,8 +3141,8 @@ void resolve(Type mt, const ref Loc loc, Scope* sc, out Expression pe, out Type 
              * template functions.
              */
         }
-        if (auto f = mt.exp.op == EXP.variable    ? (cast(   VarExp)mt.exp).var.isFuncDeclaration()
-                   : mt.exp.op == EXP.dotVariable ? (cast(DotVarExp)mt.exp).var.isFuncDeclaration() : null)
+        if (auto f = mt.exp.op == EXP.variable    ? mt.exp.isVarExp().var.isFuncDeclaration()
+                   : mt.exp.op == EXP.dotVariable ? mt.exp.isDotVarExp().var.isFuncDeclaration() : null)
         {
             // f might be a unittest declaration which is incomplete when compiled
             // without -unittest. That causes a segfault in checkForwardRef, see
@@ -3351,17 +3337,17 @@ void resolve(Type mt, const ref Loc loc, Scope* sc, out Expression pe, out Type 
 
     switch (mt.ty)
     {
-        default:        visitType      (mt);                     break;
-        case Tsarray:   visitSArray    (cast(TypeSArray)mt);     break;
-        case Tarray:    visitDArray    (cast(TypeDArray)mt);     break;
-        case Taarray:   visitAArray    (cast(TypeAArray)mt);     break;
-        case Tident:    visitIdentifier(cast(TypeIdentifier)mt); break;
-        case Tinstance: visitInstance  (cast(TypeInstance)mt);   break;
-        case Ttypeof:   visitTypeof    (cast(TypeTypeof)mt);     break;
-        case Treturn:   visitReturn    (cast(TypeReturn)mt);     break;
-        case Tslice:    visitSlice     (cast(TypeSlice)mt);      break;
-        case Tmixin:    visitMixin     (cast(TypeMixin)mt);      break;
-        case Ttraits:   visitTraits    (cast(TypeTraits)mt);     break;
+        default:        visitType      (mt);                    break;
+        case Tsarray:   visitSArray    (mt.isTypeSArray());     break;
+        case Tarray:    visitDArray    (mt.isTypeDArray());     break;
+        case Taarray:   visitAArray    (mt.isTypeAArray());     break;
+        case Tident:    visitIdentifier(mt.isTypeIdentifier()); break;
+        case Tinstance: visitInstance  (mt.isTypeInstance());   break;
+        case Ttypeof:   visitTypeof    (mt.isTypeTypeof());     break;
+        case Treturn:   visitReturn    (mt.isTypeReturn());     break;
+        case Tslice:    visitSlice     (mt.isTypeSlice());      break;
+        case Tmixin:    visitMixin     (mt.isTypeMixin());      break;
+        case Ttraits:   visitTraits    (mt.isTypeTraits());     break;
     }
 }
 
@@ -3822,10 +3808,10 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
                  *  e.opDot().ident
                  */
                 e = build_overload(e.loc, sc, e, null, fd);
-                // @@@DEPRECATED_2.087@@@.
-                e.deprecation("`opDot` is deprecated. Use `alias this`");
-                e = new DotIdExp(e.loc, e, ident);
-                return returnExp(e.expressionSemantic(sc));
+                // @@@DEPRECATED_2.110@@@.
+                // Deprecated in 2.082, made an error in 2.100.
+                e.error("`opDot` is obsolete. Use `alias this`");
+                return ErrorExp.get();
             }
 
             /* Look for overloaded opDispatch to see if we should forward request
@@ -3941,7 +3927,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
 
             e = new TupleExp(e.loc, e0, exps);
             Scope* sc2 = sc.push();
-            sc2.flags |= global.params.useDIP1000 == FeatureState.enabled ? SCOPE.onlysafeaccess : SCOPE.noaccesscheck;
+            sc2.flags |= SCOPE.noaccesscheck;
             e = e.expressionSemantic(sc2);
             sc2.pop();
             return e;
@@ -4085,7 +4071,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
                     return e.expressionSemantic(sc);
                 }
             }
-            if (d.semanticRun == PASS.init)
+            if (d.semanticRun == PASS.initial)
                 d.dsymbolSemantic(null);
             checkAccess(e.loc, sc, e, d);
             auto ve = new VarExp(e.loc, d);
@@ -4202,7 +4188,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
 
             e = new TupleExp(e.loc, e0, exps);
             Scope* sc2 = sc.push();
-            sc2.flags |= global.params.useDIP1000 == FeatureState.enabled ? SCOPE.onlysafeaccess : SCOPE.noaccesscheck;
+            sc2.flags |= SCOPE.noaccesscheck;
             e = e.expressionSemantic(sc2);
             sc2.pop();
             return e;
@@ -4316,7 +4302,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
 
             if (ident == Id.outer && mt.sym.vthis)
             {
-                if (mt.sym.vthis.semanticRun == PASS.init)
+                if (mt.sym.vthis.semanticRun == PASS.initial)
                     mt.sym.vthis.dsymbolSemantic(null);
 
                 if (auto cdp = mt.sym.toParentLocal().isClassDeclaration())
@@ -4512,7 +4498,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
                     Expression e1;
                     Type t;
                     /* returns: true to continue, false to return */
-                    if (f.isThis2)
+                    if (f.hasDualContext())
                     {
                         if (f.followInstantiationContext(ad))
                         {
@@ -4569,7 +4555,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
                 }
             }
             //printf("e = %s, d = %s\n", e.toChars(), d.toChars());
-            if (d.semanticRun == PASS.init)
+            if (d.semanticRun == PASS.initial)
                 d.dsymbolSemantic(null);
 
             // If static function, get the most visible overload.
@@ -4617,16 +4603,16 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
 
     switch (mt.ty)
     {
-        case Tvector:    return visitVector   (cast(TypeVector)mt);
-        case Tsarray:    return visitSArray   (cast(TypeSArray)mt);
-        case Tstruct:    return visitStruct   (cast(TypeStruct)mt);
-        case Tenum:      return visitEnum     (cast(TypeEnum)mt);
-        case Terror:     return visitError    (cast(TypeError)mt);
-        case Tarray:     return visitDArray   (cast(TypeDArray)mt);
-        case Taarray:    return visitAArray   (cast(TypeAArray)mt);
-        case Treference: return visitReference(cast(TypeReference)mt);
-        case Tdelegate:  return visitDelegate (cast(TypeDelegate)mt);
-        case Tclass:     return visitClass    (cast(TypeClass)mt);
+        case Tvector:    return visitVector   (mt.isTypeVector());
+        case Tsarray:    return visitSArray   (mt.isTypeSArray());
+        case Tstruct:    return visitStruct   (mt.isTypeStruct());
+        case Tenum:      return visitEnum     (mt.isTypeEnum());
+        case Terror:     return visitError    (mt.isTypeError());
+        case Tarray:     return visitDArray   (mt.isTypeDArray());
+        case Taarray:    return visitAArray   (mt.isTypeAArray());
+        case Treference: return visitReference(mt.isTypeReference());
+        case Tdelegate:  return visitDelegate (mt.isTypeDelegate());
+        case Tclass:     return visitClass    (mt.isTypeClass());
 
         default:         return mt.isTypeBasic()
                                 ? visitBasic(cast(TypeBasic)mt)
@@ -4640,11 +4626,12 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, int flag)
  * Params:
  *  mt = the type for which the init expression is returned
  *  loc = the location where the expression needs to be evaluated
+ *  isCfile = default initializers are different with C
  *
  * Returns:
  *  The initialization expression for the type.
  */
-extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
+extern (C++) Expression defaultInit(Type mt, const ref Loc loc, const bool isCfile = false)
 {
     Expression visitBasic(TypeBasic mt)
     {
@@ -4657,12 +4644,12 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
         switch (mt.ty)
         {
         case Tchar:
-            value = 0xFF;
+            value = isCfile ? 0 : 0xFF;
             break;
 
         case Twchar:
         case Tdchar:
-            value = 0xFFFF;
+            value = isCfile ? 0 : 0xFFFF;
             break;
 
         case Timaginary32:
@@ -4671,14 +4658,15 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
         case Tfloat32:
         case Tfloat64:
         case Tfloat80:
-            return new RealExp(loc, target.RealProperties.nan, mt);
+            return new RealExp(loc, isCfile ? CTFloat.zero : target.RealProperties.nan, mt);
 
         case Tcomplex32:
         case Tcomplex64:
         case Tcomplex80:
             {
                 // Can't use fvalue + I*fvalue (the im part becomes a quiet NaN).
-                const cvalue = complex_t(target.RealProperties.nan, target.RealProperties.nan);
+                const cvalue = isCfile ? complex_t(CTFloat.zero, CTFloat.zero)
+                                       : complex_t(target.RealProperties.nan, target.RealProperties.nan);
                 return new ComplexExp(loc, cvalue, mt);
             }
 
@@ -4696,7 +4684,7 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
     {
         //printf("TypeVector::defaultInit()\n");
         assert(mt.basetype.ty == Tsarray);
-        Expression e = mt.basetype.defaultInit(loc);
+        Expression e = mt.basetype.defaultInit(loc, isCfile);
         auto ve = new VectorExp(loc, e, mt);
         ve.type = mt;
         ve.dim = cast(int)(mt.basetype.size(loc) / mt.elementType().size(loc));
@@ -4710,9 +4698,9 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
             printf("TypeSArray::defaultInit() '%s'\n", mt.toChars());
         }
         if (mt.next.ty == Tvoid)
-            return mt.tuns8.defaultInit(loc);
+            return mt.tuns8.defaultInit(loc, isCfile);
         else
-            return mt.next.defaultInit(loc);
+            return mt.next.defaultInit(loc, isCfile);
     }
 
     Expression visitFunction(TypeFunction mt)
@@ -4785,12 +4773,12 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
 
     switch (mt.ty)
     {
-        case Tvector:   return visitVector  (cast(TypeVector)mt);
-        case Tsarray:   return visitSArray  (cast(TypeSArray)mt);
-        case Tfunction: return visitFunction(cast(TypeFunction)mt);
-        case Tstruct:   return visitStruct  (cast(TypeStruct)mt);
-        case Tenum:     return visitEnum    (cast(TypeEnum)mt);
-        case Ttuple:    return visitTuple   (cast(TypeTuple)mt);
+        case Tvector:   return visitVector  (mt.isTypeVector());
+        case Tsarray:   return visitSArray  (mt.isTypeSArray());
+        case Tfunction: return visitFunction(mt.isTypeFunction());
+        case Tstruct:   return visitStruct  (mt.isTypeStruct());
+        case Tenum:     return visitEnum    (mt.isTypeEnum());
+        case Ttuple:    return visitTuple   (mt.isTypeTuple());
 
         case Tnull:     return new NullExp(Loc.initial, Type.tnull);
 
@@ -4802,7 +4790,7 @@ extern (C++) Expression defaultInit(Type mt, const ref Loc loc)
         case Treference:
         case Tdelegate:
         case Tclass:    return new NullExp(loc, mt);
-        case Tnoreturn: return visitNoreturn(cast(TypeNoreturn) mt);
+        case Tnoreturn: return visitNoreturn(mt.isTypeNoreturn());
 
         default:        return mt.isTypeBasic() ?
                                 visitBasic(cast(TypeBasic)mt) :

@@ -637,3 +637,41 @@ int test(char *dest)
 // https://issues.dlang.org/show_bug.cgi?id=22512
 
 extern char *tzname[];
+
+/***************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=22584
+
+long test22584(long, long);
+
+long test22584(long a, long b)
+{
+    return a + b;
+}
+
+/***************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=22602
+
+void test22602()
+{
+    unsigned char *data;
+    data = (void *)"\0\0\xff\xff";
+}
+
+/***************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=22401
+
+struct S22401
+{
+    const int *p;
+};
+const int c22401[1] = {0};
+const struct S22401 d22401 = {c22401};
+
+/***************************************************/
+// https://issues.dlang.org/show_bug.cgi?id=22841
+
+void test22841()
+{
+    int v22841;
+    { unsigned v22841; }
+}
